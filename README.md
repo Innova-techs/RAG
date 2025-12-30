@@ -46,7 +46,12 @@ This epic delivers a usable retrieval augmented generation (RAG) MVP that lets u
 3. `python -m scripts.index_chunks --processed-dir data/processed --chroma-dir data/vectorstore --collection-name pilot-docs --verbose`.
    - Re-index only certain docs via `--doc-ids microsoft-annual-report-2022-pdf`.
    - Swap embedding models via `--embedding-model sentence-transformers/all-mpnet-base-v2` if you need better recall.
-4. Optional smoke test:
+4. Quick CLI retrieval test:
+   ```
+   python -m scripts.query_chunks --question "How did Microsoft describe FY22 results?" --k 2 --max-chars 300
+   ```
+   Add `--pretty` to dump pure JSON if you want to post-process programmatically.
+5. Optional Python smoke test:
 
 ```python
 python - <<'PY'
