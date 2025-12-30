@@ -1,7 +1,6 @@
 """Unit tests for document loaders (PDF, DOCX, Markdown)."""
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -291,6 +290,24 @@ class TestMarkdownLoader:
         assert metadata["headers"]["h2"] == 2
         assert metadata["headers"]["h3"] == 3
 
+    def test_load_markdown_hashtags_not_counted_as_headers(self, tmp_path: Path):
+        """Test that hashtags (e.g., #hashtag) are not counted as headers."""
+        content = """# Real Header
+This is a #hashtag and another #tag in text.
+##notaheader because no space
+Check out #trending topics.
+## Real H2 Header
+"""
+        md_path = tmp_path / "hashtags.md"
+        md_path.write_text(content, encoding="utf-8")
+
+        text, metadata = load_markdown(md_path)
+
+        # Only real headers with space after # should be counted
+        assert metadata["headers"]["h1"] == 1
+        assert metadata["headers"]["h2"] == 1
+        assert "h3" not in metadata["headers"]
+
     def test_load_markdown_code_blocks_detected(self, tmp_path: Path):
         """Test code blocks are counted in metadata."""
         content = """Some text
@@ -361,13 +378,14 @@ author: John Doe
     def test_load_markdown_encoding_fallback(self, tmp_path: Path):
         """Test fallback encoding for non-UTF-8 files."""
         md_path = tmp_path / "latin1.md"
-        # Write with latin-1 encoding
+        # Write with latin-1 encoding (cp1252 is tried first and will succeed)
         md_path.write_bytes("Café résumé naïve".encode("latin-1"))
 
         text, metadata = load_markdown(md_path)
 
         assert "Café" in text
-        assert metadata.get("encoding_fallback") == "latin-1"
+        # cp1252 is tried first and succeeds for latin-1 compatible bytes
+        assert metadata.get("encoding_fallback") == "cp1252"
 
     def test_load_markdown_file_not_found(self, tmp_path: Path):
         """Test missing markdown file raises DocumentParseError."""

@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, Tuple
+from typing import Any, Callable, Dict, Tuple
 
 from .models import Document
 from .text_utils import normalize_text
@@ -40,7 +40,7 @@ class DocumentParseError(Exception):
         self.partial_content = partial_content
 
 
-def load_pdf(path: Path) -> Tuple[str, Dict[str, str]]:
+def load_pdf(path: Path) -> Tuple[str, Dict[str, Any]]:
     """Load PDF file with error handling for corrupted/invalid files."""
     from PyPDF2 import PdfReader
     from PyPDF2.errors import PdfReadError
@@ -82,7 +82,7 @@ def load_pdf(path: Path) -> Tuple[str, Dict[str, str]]:
     return "\n\n".join(pages), metadata
 
 
-def load_docx(path: Path) -> Tuple[str, Dict[str, str]]:
+def load_docx(path: Path) -> Tuple[str, Dict[str, Any]]:
     """Load DOCX file with table extraction and error handling."""
     import docx
     from docx.opc.exceptions import PackageNotFoundError
@@ -141,15 +141,15 @@ def load_docx(path: Path) -> Tuple[str, Dict[str, str]]:
     return "\n\n".join(content_parts), metadata
 
 
-def load_markdown(path: Path) -> Tuple[str, Dict[str, str]]:
+def load_markdown(path: Path) -> Tuple[str, Dict[str, Any]]:
     """Load Markdown/text file with structure-aware parsing and error handling."""
     metadata = {}
 
     try:
         content = path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
-        # Try fallback encodings
-        for encoding in ["latin-1", "cp1252", "iso-8859-1"]:
+        # Try fallback encodings (latin-1 last as it accepts any byte sequence)
+        for encoding in ["cp1252", "iso-8859-1", "latin-1"]:
             try:
                 content = path.read_text(encoding=encoding)
                 metadata["encoding_fallback"] = encoding
@@ -167,21 +167,21 @@ def load_markdown(path: Path) -> Tuple[str, Dict[str, str]]:
     # Extract markdown structure metadata
     lines = content.split("\n")
 
-    # Count headers by level
+    # Count headers by level (require space after # for valid markdown headers)
     headers = {"h1": 0, "h2": 0, "h3": 0, "h4": 0, "h5": 0, "h6": 0}
     for line in lines:
         stripped = line.strip()
-        if stripped.startswith("######"):
+        if stripped.startswith("###### ") or stripped == "######":
             headers["h6"] += 1
-        elif stripped.startswith("#####"):
+        elif stripped.startswith("##### ") or stripped == "#####":
             headers["h5"] += 1
-        elif stripped.startswith("####"):
+        elif stripped.startswith("#### ") or stripped == "####":
             headers["h4"] += 1
-        elif stripped.startswith("###"):
+        elif stripped.startswith("### ") or stripped == "###":
             headers["h3"] += 1
-        elif stripped.startswith("##"):
+        elif stripped.startswith("## ") or stripped == "##":
             headers["h2"] += 1
-        elif stripped.startswith("#"):
+        elif stripped.startswith("# ") or stripped == "#":
             headers["h1"] += 1
 
     if any(headers.values()):
@@ -192,8 +192,9 @@ def load_markdown(path: Path) -> Tuple[str, Dict[str, str]]:
     if code_block_count > 0:
         metadata["code_blocks"] = code_block_count
 
-    # Detect lists
-    list_items = sum(1 for line in lines if re.match(r"^\s*[-*+]\s+", line) or re.match(r"^\s*\d+\.\s+", line))
+    # Detect lists (unordered: -, *, + and ordered: 1., 2., etc.)
+    list_pattern = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+")
+    list_items = sum(1 for line in lines if list_pattern.match(line))
     if list_items > 0:
         metadata["list_items"] = list_items
 
@@ -213,7 +214,7 @@ def load_markdown(path: Path) -> Tuple[str, Dict[str, str]]:
     return content, metadata
 
 
-HANDLERS: Dict[str, Callable[[Path], Tuple[str, Dict[str, str]]]] = {
+HANDLERS: Dict[str, Callable[[Path], Tuple[str, Dict[str, Any]]]] = {
     ".pdf": load_pdf,
     ".docx": load_docx,
     ".md": load_markdown,
