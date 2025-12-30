@@ -6,12 +6,15 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, Tuple
+from typing import Any, Callable, Dict, Tuple
 
 from .models import Document
 from .text_utils import normalize_text
 
 logger = logging.getLogger(__name__)
+
+# Pre-compiled regex patterns for performance
+_LIST_PATTERN = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+")
 
 
 class UnsupportedDocumentError(Exception):
@@ -31,32 +34,189 @@ def hash_file(path: Path) -> str:
     return sha.hexdigest()
 
 
-def load_pdf(path: Path) -> Tuple[str, Dict[str, str]]:
-    from PyPDF2 import PdfReader
+class DocumentParseError(Exception):
+    """Raised when a document cannot be parsed."""
 
-    reader = PdfReader(str(path))
+    def __init__(self, message: str, path: Path, partial_content: str = ""):
+        super().__init__(message)
+        self.path = path
+        self.partial_content = partial_content
+
+
+def load_pdf(path: Path) -> Tuple[str, Dict[str, Any]]:
+    """Load PDF file with error handling for corrupted/invalid files."""
+    from PyPDF2 import PdfReader
+    from PyPDF2.errors import PdfReadError
+
     pages = []
-    for page in reader.pages:
-        text = page.extract_text() or ""
-        pages.append(text.strip())
-    metadata = {"page_count": len(pages)}
+    failed_pages = []
+    metadata = {}
+
+    try:
+        reader = PdfReader(str(path))
+        metadata["page_count"] = len(reader.pages)
+        metadata["is_encrypted"] = reader.is_encrypted
+
+        if reader.is_encrypted:
+            logger.warning(f"PDF is encrypted: {path}")
+            metadata["parse_warning"] = "encrypted_pdf"
+            return "", metadata
+
+        for i, page in enumerate(reader.pages):
+            try:
+                text = page.extract_text() or ""
+                pages.append(text.strip())
+            except Exception as e:
+                logger.warning(f"Failed to extract page {i + 1} from {path}: {e}")
+                failed_pages.append(i + 1)
+                pages.append("")
+
+        if failed_pages:
+            metadata["failed_pages"] = failed_pages
+            metadata["parse_warning"] = f"partial_extraction_{len(failed_pages)}_pages_failed"
+
+    except PdfReadError as e:
+        logger.error(f"Corrupted PDF file: {path} - {e}")
+        raise DocumentParseError(f"Corrupted PDF: {e}", path)
+    except Exception as e:
+        logger.error(f"Failed to read PDF: {path} - {e}")
+        raise DocumentParseError(f"PDF read error: {e}", path)
+
     return "\n\n".join(pages), metadata
 
 
-def load_docx(path: Path) -> Tuple[str, Dict[str, str]]:
+def load_docx(path: Path) -> Tuple[str, Dict[str, Any]]:
+    """Load DOCX file with table extraction and error handling."""
     import docx
+    from docx.opc.exceptions import PackageNotFoundError
+    import zipfile
 
-    doc = docx.Document(str(path))
-    paragraphs = [para.text.strip() for para in doc.paragraphs if para.text.strip()]
-    metadata = {"paragraph_count": len(paragraphs)}
-    return "\n".join(paragraphs), metadata
+    content_parts = []
+    metadata = {}
+
+    try:
+        doc = docx.Document(str(path))
+
+        # Extract paragraphs
+        paragraphs = [para.text.strip() for para in doc.paragraphs if para.text.strip()]
+        metadata["paragraph_count"] = len(paragraphs)
+        content_parts.extend(paragraphs)
+
+        # Extract tables
+        table_count = 0
+        for table in doc.tables:
+            table_count += 1
+            table_text = []
+            for row in table.rows:
+                row_cells = [cell.text.strip() for cell in row.cells]
+                if any(row_cells):
+                    table_text.append(" | ".join(row_cells))
+            if table_text:
+                content_parts.append("\n[TABLE]\n" + "\n".join(table_text) + "\n[/TABLE]")
+
+        metadata["table_count"] = table_count
+
+        # Extract headers and footers
+        header_text = []
+        footer_text = []
+        for section in doc.sections:
+            if section.header and section.header.paragraphs:
+                for para in section.header.paragraphs:
+                    if para.text.strip():
+                        header_text.append(para.text.strip())
+            if section.footer and section.footer.paragraphs:
+                for para in section.footer.paragraphs:
+                    if para.text.strip():
+                        footer_text.append(para.text.strip())
+
+        if header_text:
+            metadata["has_headers"] = True
+        if footer_text:
+            metadata["has_footers"] = True
+
+    except (PackageNotFoundError, zipfile.BadZipFile) as e:
+        logger.error(f"Invalid or corrupted DOCX file: {path} - {e}")
+        raise DocumentParseError(f"Corrupted DOCX: {e}", path)
+    except Exception as e:
+        logger.error(f"Failed to read DOCX: {path} - {e}")
+        raise DocumentParseError(f"DOCX read error: {e}", path)
+
+    return "\n\n".join(content_parts), metadata
 
 
-def load_markdown(path: Path) -> Tuple[str, Dict[str, str]]:
-    return path.read_text(encoding="utf-8"), {}
+def load_markdown(path: Path) -> Tuple[str, Dict[str, Any]]:
+    """Load Markdown/text file with structure-aware parsing and error handling."""
+    metadata = {}
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        # Try fallback encodings (latin-1 last as it accepts any byte sequence)
+        for encoding in ["cp1252", "iso-8859-1", "latin-1"]:
+            try:
+                content = path.read_text(encoding=encoding)
+                metadata["encoding_fallback"] = encoding
+                logger.warning(f"Used fallback encoding {encoding} for: {path}")
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            logger.error(f"Failed to decode file with any encoding: {path}")
+            raise DocumentParseError(f"Unable to decode file", path)
+    except Exception as e:
+        logger.error(f"Failed to read file: {path} - {e}")
+        raise DocumentParseError(f"File read error: {e}", path)
+
+    # Extract markdown structure metadata
+    lines = content.split("\n")
+
+    # Count headers by level (require space after # for valid markdown headers)
+    headers = {"h1": 0, "h2": 0, "h3": 0, "h4": 0, "h5": 0, "h6": 0}
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("###### ") or stripped == "######":
+            headers["h6"] += 1
+        elif stripped.startswith("##### ") or stripped == "#####":
+            headers["h5"] += 1
+        elif stripped.startswith("#### ") or stripped == "####":
+            headers["h4"] += 1
+        elif stripped.startswith("### ") or stripped == "###":
+            headers["h3"] += 1
+        elif stripped.startswith("## ") or stripped == "##":
+            headers["h2"] += 1
+        elif stripped.startswith("# ") or stripped == "#":
+            headers["h1"] += 1
+
+    if any(headers.values()):
+        metadata["headers"] = {k: v for k, v in headers.items() if v > 0}
+
+    # Detect code blocks
+    code_block_count = content.count("```") // 2
+    if code_block_count > 0:
+        metadata["code_blocks"] = code_block_count
+
+    # Detect lists (unordered: -, *, + and ordered: 1., 2., etc.)
+    list_items = sum(1 for line in lines if _LIST_PATTERN.match(line))
+    if list_items > 0:
+        metadata["list_items"] = list_items
+
+    # Detect links
+    links = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", content)
+    if links:
+        metadata["link_count"] = len(links)
+
+    # Extract front matter if present (YAML)
+    if content.startswith("---"):
+        end_marker = content.find("---", 3)
+        if end_marker != -1:
+            metadata["has_frontmatter"] = True
+
+    metadata["line_count"] = len(lines)
+
+    return content, metadata
 
 
-HANDLERS: Dict[str, Callable[[Path], Tuple[str, Dict[str, str]]]] = {
+HANDLERS: Dict[str, Callable[[Path], Tuple[str, Dict[str, Any]]]] = {
     ".pdf": load_pdf,
     ".docx": load_docx,
     ".md": load_markdown,
