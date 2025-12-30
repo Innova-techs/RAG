@@ -387,6 +387,34 @@ author: John Doe
         # cp1252 is tried first and succeeds for latin-1 compatible bytes
         assert metadata.get("encoding_fallback") == "cp1252"
 
+    def test_load_markdown_encoding_fallback_cp1252_euro(self, tmp_path: Path):
+        """Test cp1252 encoding with euro symbol (byte 0x80)."""
+        md_path = tmp_path / "euro.md"
+        # Euro symbol is 0x80 in cp1252, which is a control char in iso-8859-1
+        # This verifies cp1252 is tried first and handles Windows-specific chars
+        md_path.write_bytes(b"Price: \x80100 (euro symbol)")
+
+        text, metadata = load_markdown(md_path)
+
+        assert "100" in text
+        assert metadata.get("encoding_fallback") == "cp1252"
+
+    def test_load_markdown_lists_with_high_numbers(self, tmp_path: Path):
+        """Test list detection with multi-digit ordered list numbers."""
+        content = """1. First item
+10. Tenth item
+99. Ninety-ninth item
+100. Hundredth item
+999. Large number item
+"""
+        md_path = tmp_path / "high_numbers.md"
+        md_path.write_text(content, encoding="utf-8")
+
+        text, metadata = load_markdown(md_path)
+
+        # All ordered list items should be detected regardless of number size
+        assert metadata["list_items"] == 5
+
     def test_load_markdown_file_not_found(self, tmp_path: Path):
         """Test missing markdown file raises DocumentParseError."""
         md_path = tmp_path / "missing.md"
