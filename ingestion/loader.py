@@ -13,6 +13,9 @@ from .text_utils import normalize_text
 
 logger = logging.getLogger(__name__)
 
+# Pre-compiled regex patterns for performance
+_LIST_PATTERN = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+")
+
 
 class UnsupportedDocumentError(Exception):
     """Raised when the pipeline encounters an unsupported extension."""
@@ -193,8 +196,7 @@ def load_markdown(path: Path) -> Tuple[str, Dict[str, Any]]:
         metadata["code_blocks"] = code_block_count
 
     # Detect lists (unordered: -, *, + and ordered: 1., 2., etc.)
-    list_pattern = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+")
-    list_items = sum(1 for line in lines if list_pattern.match(line))
+    list_items = sum(1 for line in lines if _LIST_PATTERN.match(line))
     if list_items > 0:
         metadata["list_items"] = list_items
 
