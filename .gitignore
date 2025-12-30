@@ -205,3 +205,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# RAG pipeline artifacts
+data/processed/
+data/vectorstore/
