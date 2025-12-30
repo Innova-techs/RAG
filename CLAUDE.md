@@ -52,6 +52,8 @@ data/raw/ (PDF, DOCX, MD, TXT)
 - `chunker.py`: Paragraph-aware chunking (~400 tokens, 80-token overlap)
 - `storage.py`: JSONL chunk persistence with manifest tracking
 - `pipeline.py`: `IngestionPipeline` orchestrates discover → load → chunk → store
+- `normalizer.py`: Configurable text normalization with `TextNormalizer` and `NormalizationConfig`
+- `normalization_rules.py`: Pre-defined regex patterns for page numbers, boilerplate, special chars
 
 **indexing/** - Vector database operations
 - `chroma_store.py`: Chroma persistence with cosine distance
@@ -74,3 +76,49 @@ data/raw/ (PDF, DOCX, MD, TXT)
 - Embedding model: `sentence-transformers/all-MiniLM-L6-v2`
 - Vector metric: Cosine distance
 - Upsert batch size: 32 chunks
+
+### Text Normalization
+
+The ingestion pipeline includes configurable text normalization applied after document parsing:
+
+**Components:**
+- `NormalizationConfig`: Dataclass with all configuration options
+- `TextNormalizer`: Applies configured rules to document text
+- `NormalizationResult`: Contains normalized text and metadata
+
+**Normalization Order:**
+1. Zero-width character removal
+2. Special character normalization (smart quotes → ASCII)
+3. Bullet character normalization
+4. Page number removal
+5. Boilerplate removal (confidential, copyright, etc.)
+6. Header/footer removal (repeated lines)
+7. Custom pattern/replacement application
+8. Whitespace normalization
+
+**CLI Usage:**
+```bash
+# Default normalization (all features enabled)
+python -m scripts.ingest --input-dir data/raw --output-dir data/processed
+
+# Minimal (whitespace and special chars only)
+python -m scripts.ingest --normalize minimal
+
+# Aggressive (stricter thresholds)
+python -m scripts.ingest --normalize aggressive
+
+# Disable normalization
+python -m scripts.ingest --normalize none
+
+# Custom YAML config
+python -m scripts.ingest --normalize-config config/normalization.yaml
+
+# Disable specific features
+python -m scripts.ingest --no-remove-page-numbers --no-remove-boilerplate
+```
+
+**Normalization Presets:**
+- `default`: All features enabled with balanced thresholds
+- `minimal`: Only whitespace/special chars (preserves structure)
+- `aggressive`: All features with stricter header/footer detection
+- `none`: No normalization applied

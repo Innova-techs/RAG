@@ -1,12 +1,13 @@
 ﻿from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from .chunker import chunk_document
 from .loader import DocumentLoader, UnsupportedDocumentError, discover_documents
+from .normalizer import NormalizationConfig, TextNormalizer
 from .storage import StorageManager
 
 logger = logging.getLogger(__name__)
@@ -14,11 +15,23 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PipelineConfig:
+    """Configuration for the ingestion pipeline.
+
+    Attributes:
+        input_dir: Directory containing source documents.
+        output_dir: Directory for processed chunks and manifest.
+        chunk_size_tokens: Target token count per chunk.
+        chunk_overlap_tokens: Overlapping tokens between chunks.
+        fail_fast: Stop on first failure instead of continuing.
+        normalization_config: Optional configuration for text normalization.
+    """
+
     input_dir: Path
     output_dir: Path
     chunk_size_tokens: int = 400
     chunk_overlap_tokens: int = 80
     fail_fast: bool = False
+    normalization_config: Optional[NormalizationConfig] = field(default=None)
 
 
 @dataclass
@@ -31,9 +44,26 @@ class PipelineResult:
 
 
 class IngestionPipeline:
+    """Pipeline for ingesting documents into normalized, chunked format.
+
+    The pipeline discovers documents, loads them, optionally normalizes text,
+    chunks the content, and persists the results.
+    """
+
     def __init__(self, config: PipelineConfig):
+        """Initialize the ingestion pipeline.
+
+        Args:
+            config: Pipeline configuration including paths and normalization settings.
+        """
         self.config = config
-        self.loader = DocumentLoader(config.input_dir)
+
+        # Create normalizer if config provided
+        normalizer: Optional[TextNormalizer] = None
+        if config.normalization_config is not None:
+            normalizer = TextNormalizer(config.normalization_config)
+
+        self.loader = DocumentLoader(config.input_dir, normalizer=normalizer)
         self.storage = StorageManager(config.output_dir)
 
     def run(self) -> PipelineResult:

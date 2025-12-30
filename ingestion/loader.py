@@ -3,12 +3,13 @@
 import hashlib
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from .models import Document
+from .normalizer import NormalizationResult, TextNormalizer
 from .text_utils import normalize_text
 
 logger = logging.getLogger(__name__)
@@ -226,15 +227,43 @@ HANDLERS: Dict[str, Callable[[Path], Tuple[str, Dict[str, Any]]]] = {
 
 @dataclass
 class DocumentLoader:
+    """Document loader with optional text normalization.
+
+    Attributes:
+        input_root: Root directory for input documents.
+        normalizer: Optional TextNormalizer for additional text cleaning.
+    """
+
     input_root: Path
+    normalizer: Optional[TextNormalizer] = field(default=None)
 
     def load(self, path: Path) -> Tuple[Document, str]:
+        """Load and process a document from disk.
+
+        Args:
+            path: Path to the document file.
+
+        Returns:
+            Tuple of (Document, content_hash).
+
+        Raises:
+            UnsupportedDocumentError: If no handler exists for the file type.
+        """
         ext = path.suffix.lower()
         if ext not in HANDLERS:
             raise UnsupportedDocumentError(f"No loader configured for {ext} files.")
         handler = HANDLERS[ext]
         raw_text, extra_metadata = handler(path)
+
+        # Apply basic text normalization
         normalized_text = normalize_text(raw_text)
+
+        # Apply advanced normalization if configured
+        normalization_result: Optional[NormalizationResult] = None
+        if self.normalizer is not None:
+            normalization_result = self.normalizer.normalize(normalized_text)
+            normalized_text = normalization_result.text
+
         try:
             rel_path = str(path.relative_to(self.input_root)).replace("\\", "/")
         except ValueError:
@@ -250,6 +279,16 @@ class DocumentLoader:
         metadata.update(extra_metadata or {})
         content_hash = hash_file(path)
         metadata["content_hash"] = content_hash
+
+        # Add normalization metadata if normalization was applied
+        if normalization_result is not None:
+            metadata["normalization"] = {
+                "original_length": normalization_result.original_length,
+                "normalized_length": normalization_result.normalized_length,
+                "rules_applied": normalization_result.rules_applied,
+                "removed_patterns": normalization_result.removed_patterns,
+            }
+
         doc_id = slugify(rel_path)
         document = Document(
             doc_id=doc_id,
