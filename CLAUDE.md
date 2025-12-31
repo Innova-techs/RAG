@@ -40,7 +40,7 @@ python -m scripts.index_chunks --doc-ids doc-id-1 doc-id-2 --verbose
 ### Data Flow
 ```
 data/raw/ (PDF, DOCX, MD, TXT)
-    → [ingestion] → data/processed/chunks/*.jsonl + manifest.json
+    → [ingestion] → data/processed/chunks/*.jsonl + manifest.json + failures.json + ingestion-report.json
     → [indexing]  → data/vectorstore/ (Chroma)
     → [query]     → Top-k semantic matches
 ```
@@ -50,10 +50,11 @@ data/raw/ (PDF, DOCX, MD, TXT)
 **ingestion/** - Document parsing and chunking
 - `loader.py`: Multi-format document loading (PDF via PyPDF2, DOCX via python-docx)
 - `chunker.py`: Paragraph-aware chunking (~400 tokens, 80-token overlap)
-- `storage.py`: JSONL chunk persistence with manifest tracking
+- `storage.py`: JSONL chunk persistence, manifest tracking, failure/report storage
 - `pipeline.py`: `IngestionPipeline` orchestrates discover → load → chunk → store
 - `normalizer.py`: Configurable text normalization with `TextNormalizer` and `NormalizationConfig`
 - `normalization_rules.py`: Pre-defined regex patterns for page numbers, boilerplate, special chars
+- `models.py`: Data models (`Document`, `DocumentChunk`, `FailureInfo`)
 
 **indexing/** - Vector database operations
 - `chroma_store.py`: Chroma persistence with cosine distance
@@ -69,6 +70,7 @@ data/raw/ (PDF, DOCX, MD, TXT)
 - **Chunk IDs**: Format `{doc_id}::chunk-{index:04d}` enables selective re-indexing
 - **Batch Processing**: Configurable batch sizes for embedding and upsert operations
 - **Fail-fast Mode**: Optional `--fail-fast` flag to stop on first error vs. continue with failures
+- **Failure Tolerance**: Failed documents are logged with full details and can be retried independently
 
 ### Configuration Defaults
 - Chunk size: 400 tokens
@@ -122,3 +124,30 @@ python -m scripts.ingest --no-remove-page-numbers --no-remove-boilerplate
 - `minimal`: Only whitespace/special chars (preserves structure)
 - `aggressive`: All features with stricter header/footer detection
 - `none`: No normalization applied
+
+### Batch Processing with Failure Tolerance
+
+The ingestion pipeline continues processing on individual document failures and provides detailed failure reporting:
+
+**Output Files:**
+- `failures.json`: Structured failure data with error type, message, and full traceback
+- `ingestion-report.json`: Run summary with timing, counts, and failure list
+
+**CLI Usage:**
+```bash
+# Normal batch run (continues on failures)
+python -m scripts.ingest --input-dir data/raw --output-dir data/processed
+
+# Retry only previously failed documents
+python -m scripts.ingest --retry-failed --output-dir data/processed
+
+# Stop on first failure
+python -m scripts.ingest --fail-fast --input-dir data/raw --output-dir data/processed
+```
+
+**FailureInfo Model:**
+- `source_path`: Path to failed document
+- `error_type`: Exception class name
+- `error_message`: Error description
+- `traceback`: Full stack trace for debugging
+- `timestamp`: When the failure occurred
