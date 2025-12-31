@@ -1,6 +1,7 @@
 """Unit tests for document loaders (PDF, DOCX, Markdown)."""
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -8,6 +9,8 @@ import pytest
 
 from ingestion.loader import (
     DocumentParseError,
+    _parse_pdf_date,
+    _parse_yaml_frontmatter,
     load_docx,
     load_markdown,
     load_pdf,
@@ -455,3 +458,278 @@ class TestErrorHandling:
                 load_docx(docx_path)
 
             assert "Corrupted DOCX" in str(exc_info.value)
+
+
+class TestPDFMetadataExtraction:
+    """Tests for PDF metadata extraction."""
+
+    def test_parse_pdf_date_full_format(self):
+        """Test parsing full PDF date format."""
+        result = _parse_pdf_date("D:20240115103045")
+        assert result == "2024-01-15T10:30:45"
+
+    def test_parse_pdf_date_short_format(self):
+        """Test parsing short PDF date format."""
+        result = _parse_pdf_date("D:20240115")
+        assert result == "2024-01-15"
+
+    def test_parse_pdf_date_without_prefix(self):
+        """Test parsing date without D: prefix."""
+        result = _parse_pdf_date("20240115103045")
+        assert result == "2024-01-15T10:30:45"
+
+    def test_parse_pdf_date_none(self):
+        """Test parsing None date."""
+        result = _parse_pdf_date(None)
+        assert result is None
+
+    def test_parse_pdf_date_empty(self):
+        """Test parsing empty date."""
+        result = _parse_pdf_date("")
+        assert result is None
+
+    def test_load_pdf_extracts_metadata(self, tmp_path: Path):
+        """Test PDF metadata extraction from document properties."""
+        with patch("PyPDF2.PdfReader") as mock_reader:
+            mock_page = MagicMock()
+            mock_page.extract_text.return_value = "Content"
+
+            mock_metadata = MagicMock()
+            mock_metadata.title = "Test Document"
+            mock_metadata.author = "John Doe"
+            mock_metadata.creator = "Microsoft Word"
+            mock_metadata.producer = "Adobe PDF"
+            mock_metadata.subject = "Testing"
+            mock_metadata.creation_date = "D:20240115103000"
+            mock_metadata.modification_date = "D:20240120140000"
+
+            mock_reader.return_value.pages = [mock_page]
+            mock_reader.return_value.is_encrypted = False
+            mock_reader.return_value.metadata = mock_metadata
+
+            pdf_path = tmp_path / "test.pdf"
+            pdf_path.touch()
+
+            text, metadata = load_pdf(pdf_path)
+
+            assert metadata["title"] == "Test Document"
+            assert metadata["author"] == "John Doe"
+            assert metadata["creator"] == "Microsoft Word"
+            assert metadata["producer"] == "Adobe PDF"
+            assert metadata["subject"] == "Testing"
+            assert metadata["creation_date"] == "2024-01-15T10:30:00"
+            assert metadata["modification_date"] == "2024-01-20T14:00:00"
+
+    def test_load_pdf_title_fallback_to_filename(self, tmp_path: Path):
+        """Test PDF uses filename as title when metadata is empty."""
+        with patch("PyPDF2.PdfReader") as mock_reader:
+            mock_page = MagicMock()
+            mock_page.extract_text.return_value = "Content"
+
+            mock_metadata = MagicMock()
+            mock_metadata.title = None
+            mock_metadata.author = None
+            mock_metadata.creator = None
+            mock_metadata.producer = None
+            mock_metadata.subject = None
+            mock_metadata.creation_date = None
+            mock_metadata.modification_date = None
+
+            mock_reader.return_value.pages = [mock_page]
+            mock_reader.return_value.is_encrypted = False
+            mock_reader.return_value.metadata = mock_metadata
+
+            pdf_path = tmp_path / "my_document.pdf"
+            pdf_path.touch()
+
+            text, metadata = load_pdf(pdf_path)
+
+            assert metadata["title"] == "my_document"
+
+
+class TestDOCXMetadataExtraction:
+    """Tests for DOCX metadata extraction."""
+
+    def test_load_docx_extracts_core_properties(self, tmp_path: Path):
+        """Test DOCX metadata extraction from core properties."""
+        with patch("docx.Document") as mock_doc:
+            mock_doc.return_value.paragraphs = []
+            mock_doc.return_value.tables = []
+            mock_doc.return_value.sections = []
+
+            mock_core_props = MagicMock()
+            mock_core_props.title = "Test Document"
+            mock_core_props.author = "Jane Smith"
+            mock_core_props.subject = "Testing"
+            mock_core_props.keywords = "test, unit, python"
+            mock_core_props.category = "Documentation"
+            mock_core_props.comments = "Test file"
+            mock_core_props.created = datetime(2024, 1, 15, 10, 30, 0)
+            mock_core_props.modified = datetime(2024, 1, 20, 14, 0, 0)
+            mock_core_props.last_modified_by = "John Doe"
+            mock_core_props.revision = 5
+
+            mock_doc.return_value.core_properties = mock_core_props
+
+            docx_path = tmp_path / "test.docx"
+            docx_path.touch()
+
+            text, metadata = load_docx(docx_path)
+
+            assert metadata["title"] == "Test Document"
+            assert metadata["author"] == "Jane Smith"
+            assert metadata["subject"] == "Testing"
+            assert metadata["keywords"] == "test, unit, python"
+            assert metadata["category"] == "Documentation"
+            assert metadata["comments"] == "Test file"
+            assert "2024-01-15" in metadata["creation_date"]
+            assert "2024-01-20" in metadata["modification_date"]
+            assert metadata["last_modified_by"] == "John Doe"
+            assert metadata["revision"] == 5
+
+    def test_load_docx_title_fallback_to_filename(self, tmp_path: Path):
+        """Test DOCX uses filename as title when core properties empty."""
+        with patch("docx.Document") as mock_doc:
+            mock_doc.return_value.paragraphs = []
+            mock_doc.return_value.tables = []
+            mock_doc.return_value.sections = []
+
+            mock_core_props = MagicMock()
+            mock_core_props.title = None
+            mock_core_props.author = None
+            mock_core_props.subject = None
+            mock_core_props.keywords = None
+            mock_core_props.category = None
+            mock_core_props.comments = None
+            mock_core_props.created = None
+            mock_core_props.modified = None
+            mock_core_props.last_modified_by = None
+            mock_core_props.revision = None
+
+            mock_doc.return_value.core_properties = mock_core_props
+
+            docx_path = tmp_path / "my_report.docx"
+            docx_path.touch()
+
+            text, metadata = load_docx(docx_path)
+
+            assert metadata["title"] == "my_report"
+
+
+class TestMarkdownMetadataExtraction:
+    """Tests for Markdown metadata extraction."""
+
+    def test_parse_yaml_frontmatter_basic(self):
+        """Test parsing basic YAML front matter."""
+        content = """---
+title: My Document
+author: John Doe
+date: 2024-01-15
+---
+
+# Content"""
+        frontmatter, remaining = _parse_yaml_frontmatter(content)
+
+        assert frontmatter["title"] == "My Document"
+        assert frontmatter["author"] == "John Doe"
+        assert frontmatter["date"] == "2024-01-15"
+        assert remaining.strip().startswith("# Content")
+
+    def test_parse_yaml_frontmatter_with_quotes(self):
+        """Test parsing front matter with quoted values."""
+        content = """---
+title: "My Document: A Study"
+author: 'Jane Doe'
+---
+
+Content"""
+        frontmatter, _ = _parse_yaml_frontmatter(content)
+
+        assert frontmatter["title"] == "My Document: A Study"
+        assert frontmatter["author"] == "Jane Doe"
+
+    def test_parse_yaml_frontmatter_with_array(self):
+        """Test parsing front matter with array values."""
+        content = """---
+tags: [python, testing, unit]
+---
+
+Content"""
+        frontmatter, _ = _parse_yaml_frontmatter(content)
+
+        assert frontmatter["tags"] == ["python", "testing", "unit"]
+
+    def test_parse_yaml_frontmatter_no_frontmatter(self):
+        """Test parsing content without front matter."""
+        content = "# Just a heading\n\nSome content."
+        frontmatter, remaining = _parse_yaml_frontmatter(content)
+
+        assert frontmatter == {}
+        assert remaining == content
+
+    def test_load_markdown_extracts_frontmatter_metadata(self, tmp_path: Path):
+        """Test markdown extracts metadata from front matter."""
+        content = """---
+title: Getting Started
+author: Alice
+date: 2024-06-01
+tags: [tutorial, beginner]
+description: A beginner's guide
+---
+
+# Introduction
+
+Welcome to the guide."""
+        md_path = tmp_path / "guide.md"
+        md_path.write_text(content, encoding="utf-8")
+
+        text, metadata = load_markdown(md_path)
+
+        assert metadata["title"] == "Getting Started"
+        assert metadata["author"] == "Alice"
+        assert metadata["creation_date"] == "2024-06-01"
+        assert metadata["tags"] == ["tutorial", "beginner"]
+        assert metadata["description"] == "A beginner's guide"
+        assert metadata["has_frontmatter"] is True
+
+    def test_load_markdown_title_fallback_to_h1(self, tmp_path: Path):
+        """Test markdown uses first H1 as title when no front matter."""
+        content = """# My Amazing Article
+
+Some introductory text.
+
+## Section 1
+
+More content."""
+        md_path = tmp_path / "article.md"
+        md_path.write_text(content, encoding="utf-8")
+
+        text, metadata = load_markdown(md_path)
+
+        assert metadata["title"] == "My Amazing Article"
+
+    def test_load_markdown_title_fallback_to_filename(self, tmp_path: Path):
+        """Test markdown uses filename as title when no H1 or front matter."""
+        content = """Just some plain text without any headers."""
+        md_path = tmp_path / "notes.md"
+        md_path.write_text(content, encoding="utf-8")
+
+        text, metadata = load_markdown(md_path)
+
+        assert metadata["title"] == "notes"
+
+    def test_load_markdown_frontmatter_overrides_h1(self, tmp_path: Path):
+        """Test front matter title takes precedence over H1."""
+        content = """---
+title: Official Title
+---
+
+# Different H1 Title
+
+Content here."""
+        md_path = tmp_path / "test.md"
+        md_path.write_text(content, encoding="utf-8")
+
+        text, metadata = load_markdown(md_path)
+
+        assert metadata["title"] == "Official Title"

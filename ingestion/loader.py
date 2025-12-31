@@ -44,6 +44,40 @@ class DocumentParseError(Exception):
         self.partial_content = partial_content
 
 
+def _parse_pdf_date(date_str: Optional[str]) -> Optional[str]:
+    """Parse PDF date string to ISO format.
+
+    PDF dates are typically in format: D:YYYYMMDDHHmmSS+HH'mm'
+    """
+    if not date_str:
+        return None
+
+    # Remove 'D:' prefix if present
+    if date_str.startswith("D:"):
+        date_str = date_str[2:]
+
+    # Try to parse common PDF date formats
+    try:
+        # Basic format: YYYYMMDDHHMMSS
+        if len(date_str) >= 14:
+            year = date_str[0:4]
+            month = date_str[4:6]
+            day = date_str[6:8]
+            hour = date_str[8:10]
+            minute = date_str[10:12]
+            second = date_str[12:14]
+            return f"{year}-{month}-{day}T{hour}:{minute}:{second}"
+        elif len(date_str) >= 8:
+            year = date_str[0:4]
+            month = date_str[4:6]
+            day = date_str[6:8]
+            return f"{year}-{month}-{day}"
+    except (ValueError, IndexError):
+        pass
+
+    return None
+
+
 def load_pdf(path: Path) -> Tuple[str, Dict[str, Any]]:
     """Load PDF file with error handling for corrupted/invalid files."""
     from PyPDF2 import PdfReader
@@ -57,6 +91,33 @@ def load_pdf(path: Path) -> Tuple[str, Dict[str, Any]]:
         reader = PdfReader(str(path))
         metadata["page_count"] = len(reader.pages)
         metadata["is_encrypted"] = reader.is_encrypted
+
+        # Extract document metadata
+        if reader.metadata:
+            pdf_meta = reader.metadata
+            if pdf_meta.title:
+                metadata["title"] = pdf_meta.title
+            if pdf_meta.author:
+                metadata["author"] = pdf_meta.author
+            if pdf_meta.creator:
+                metadata["creator"] = pdf_meta.creator
+            if pdf_meta.producer:
+                metadata["producer"] = pdf_meta.producer
+            if pdf_meta.subject:
+                metadata["subject"] = pdf_meta.subject
+
+            # Parse dates
+            creation_date = _parse_pdf_date(pdf_meta.creation_date)
+            if creation_date:
+                metadata["creation_date"] = creation_date
+
+            mod_date = _parse_pdf_date(pdf_meta.modification_date)
+            if mod_date:
+                metadata["modification_date"] = mod_date
+
+        # Fallback: use filename as title if not in metadata
+        if "title" not in metadata:
+            metadata["title"] = path.stem
 
         if reader.is_encrypted:
             logger.warning(f"PDF is encrypted: {path}")
@@ -97,6 +158,33 @@ def load_docx(path: Path) -> Tuple[str, Dict[str, Any]]:
 
     try:
         doc = docx.Document(str(path))
+
+        # Extract core properties (document metadata)
+        core_props = doc.core_properties
+        if core_props.title:
+            metadata["title"] = core_props.title
+        if core_props.author:
+            metadata["author"] = core_props.author
+        if core_props.subject:
+            metadata["subject"] = core_props.subject
+        if core_props.keywords:
+            metadata["keywords"] = core_props.keywords
+        if core_props.category:
+            metadata["category"] = core_props.category
+        if core_props.comments:
+            metadata["comments"] = core_props.comments
+        if core_props.created:
+            metadata["creation_date"] = core_props.created.isoformat()
+        if core_props.modified:
+            metadata["modification_date"] = core_props.modified.isoformat()
+        if core_props.last_modified_by:
+            metadata["last_modified_by"] = core_props.last_modified_by
+        if core_props.revision is not None:
+            metadata["revision"] = core_props.revision
+
+        # Fallback: use filename as title if not in metadata
+        if "title" not in metadata:
+            metadata["title"] = path.stem
 
         # Extract paragraphs
         paragraphs = [para.text.strip() for para in doc.paragraphs if para.text.strip()]
@@ -145,6 +233,51 @@ def load_docx(path: Path) -> Tuple[str, Dict[str, Any]]:
     return "\n\n".join(content_parts), metadata
 
 
+def _parse_yaml_frontmatter(content: str) -> Tuple[Dict[str, Any], str]:
+    """Parse YAML front matter from markdown content.
+
+    Returns:
+        Tuple of (frontmatter_dict, content_without_frontmatter)
+    """
+    if not content.startswith("---"):
+        return {}, content
+
+    # Find the closing ---
+    end_marker = content.find("\n---", 3)
+    if end_marker == -1:
+        return {}, content
+
+    frontmatter_str = content[4:end_marker].strip()
+    remaining_content = content[end_marker + 4:].lstrip("\n")
+
+    # Parse YAML manually (simple key: value pairs)
+    frontmatter = {}
+    for line in frontmatter_str.split("\n"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        if ":" in line:
+            key, _, value = line.partition(":")
+            key = key.strip().lower()
+            value = value.strip()
+
+            # Remove quotes if present
+            if (value.startswith('"') and value.endswith('"')) or \
+               (value.startswith("'") and value.endswith("'")):
+                value = value[1:-1]
+
+            # Handle arrays (simple format: [item1, item2])
+            if value.startswith("[") and value.endswith("]"):
+                items = value[1:-1].split(",")
+                value = [item.strip().strip("\"'") for item in items if item.strip()]
+
+            if value:
+                frontmatter[key] = value
+
+    return frontmatter, remaining_content
+
+
 def load_markdown(path: Path) -> Tuple[str, Dict[str, Any]]:
     """Load Markdown/text file with structure-aware parsing and error handling."""
     metadata = {}
@@ -168,11 +301,30 @@ def load_markdown(path: Path) -> Tuple[str, Dict[str, Any]]:
         logger.error(f"Failed to read file: {path} - {e}")
         raise DocumentParseError(f"File read error: {e}", path)
 
+    # Parse front matter if present
+    frontmatter, _ = _parse_yaml_frontmatter(content)
+    if frontmatter:
+        metadata["has_frontmatter"] = True
+        # Extract common frontmatter fields
+        if "title" in frontmatter:
+            metadata["title"] = frontmatter["title"]
+        if "author" in frontmatter:
+            metadata["author"] = frontmatter["author"]
+        if "date" in frontmatter:
+            metadata["creation_date"] = frontmatter["date"]
+        if "tags" in frontmatter:
+            metadata["tags"] = frontmatter["tags"]
+        if "description" in frontmatter:
+            metadata["description"] = frontmatter["description"]
+        if "categories" in frontmatter:
+            metadata["categories"] = frontmatter["categories"]
+
     # Extract markdown structure metadata
     lines = content.split("\n")
 
-    # Count headers by level (require space after # for valid markdown headers)
+    # Count headers by level and extract first H1 for title fallback
     headers = {"h1": 0, "h2": 0, "h3": 0, "h4": 0, "h5": 0, "h6": 0}
+    first_h1 = None
     for line in lines:
         stripped = line.strip()
         if stripped.startswith("###### ") or stripped == "######":
@@ -185,11 +337,22 @@ def load_markdown(path: Path) -> Tuple[str, Dict[str, Any]]:
             headers["h3"] += 1
         elif stripped.startswith("## ") or stripped == "##":
             headers["h2"] += 1
-        elif stripped.startswith("# ") or stripped == "#":
+        elif stripped.startswith("# "):
+            headers["h1"] += 1
+            if first_h1 is None:
+                first_h1 = stripped[2:].strip()
+        elif stripped == "#":
             headers["h1"] += 1
 
     if any(headers.values()):
         metadata["headers"] = {k: v for k, v in headers.items() if v > 0}
+
+    # Fallback: use first H1 as title, then filename
+    if "title" not in metadata:
+        if first_h1:
+            metadata["title"] = first_h1
+        else:
+            metadata["title"] = path.stem
 
     # Detect code blocks
     code_block_count = content.count("```") // 2
@@ -205,12 +368,6 @@ def load_markdown(path: Path) -> Tuple[str, Dict[str, Any]]:
     links = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", content)
     if links:
         metadata["link_count"] = len(links)
-
-    # Extract front matter if present (YAML)
-    if content.startswith("---"):
-        end_marker = content.find("---", 3)
-        if end_marker != -1:
-            metadata["has_frontmatter"] = True
 
     metadata["line_count"] = len(lines)
 
@@ -279,6 +436,7 @@ class DocumentLoader:
         metadata.update(extra_metadata or {})
         content_hash = hash_file(path)
         metadata["content_hash"] = content_hash
+        metadata["ingestion_timestamp"] = datetime.utcnow().isoformat() + "Z"
 
         # Add normalization metadata if normalization was applied
         if normalization_result is not None:
