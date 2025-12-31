@@ -66,11 +66,37 @@ def format_result(
     if distance is not None:
         header += f" | distance={distance:.4f}"
 
-    span = ""
-    if "paragraph_start" in metadata and "paragraph_end" in metadata:
-        span = f" paragraphs {metadata['paragraph_start']}-{metadata['paragraph_end']}"
+    # Build location info line
+    location_parts = []
 
-    return f"{header}{span}\n    {snippet}"
+    # Page info (for PDFs)
+    if "page" in metadata:
+        location_parts.append(f"page {metadata['page']}")
+
+    # Section info
+    if "section" in metadata:
+        section = metadata["section"]
+        # Truncate long section names
+        if len(section) > 40:
+            section = section[:37] + "..."
+        location_parts.append(f'section "{section}"')
+
+    # Paragraph span
+    if "paragraph_start" in metadata and "paragraph_end" in metadata:
+        location_parts.append(
+            f"paragraphs {metadata['paragraph_start']}-{metadata['paragraph_end']}"
+        )
+
+    location_line = ""
+    if location_parts:
+        location_line = f"\n    [{', '.join(location_parts)}]"
+
+    # Timestamp for freshness indication
+    timestamp_line = ""
+    if "timestamp" in metadata and metadata["timestamp"]:
+        timestamp_line = f"\n    indexed: {metadata['timestamp']}"
+
+    return f"{header}{location_line}{timestamp_line}\n    {snippet}"
 
 
 def main() -> int:

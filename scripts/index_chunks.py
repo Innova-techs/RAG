@@ -48,6 +48,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable debug logging output.",
     )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Verify metadata integrity after indexing.",
+    )
+    parser.add_argument(
+        "--verify-sample",
+        type=int,
+        default=100,
+        help="Number of chunks to sample for verification (default: 100).",
+    )
     return parser.parse_args()
 
 
@@ -82,6 +93,18 @@ def main() -> int:
         result.skipped_docs,
         result.failed_chunks,
     )
+
+    # Run metadata verification if requested
+    if args.verify:
+        verification = pipeline.verify_metadata(sample_size=args.verify_sample)
+        if verification.missing_fields > 0:
+            logging.warning(
+                "Metadata verification found %d chunks with missing required fields.",
+                verification.missing_fields,
+            )
+        else:
+            logging.info("Metadata verification passed: all required fields present.")
+
     return 0
 
 

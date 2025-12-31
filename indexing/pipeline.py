@@ -24,12 +24,35 @@ class IndexingConfig:
     doc_filter: Optional[Sequence[str]] = None
 
 
+# Required metadata fields for Chroma chunks (Issue #14)
+REQUIRED_METADATA_FIELDS = frozenset({
+    "doc_id",
+    "source_path",
+    "chunk_index",
+    "timestamp",
+})
+
+
+@dataclass
+class MetadataVerificationResult:
+    """Result of metadata verification check."""
+
+    verified_chunks: int = 0
+    missing_fields: int = 0
+    field_coverage: dict = None
+
+    def __post_init__(self):
+        if self.field_coverage is None:
+            self.field_coverage = {}
+
+
 @dataclass
 class IndexingResult:
     indexed_docs: int
     indexed_chunks: int
     skipped_docs: int
     failed_chunks: int = 0
+    verification: MetadataVerificationResult = None
 
 
 class ChromaIndexingPipeline:
@@ -150,3 +173,77 @@ class ChromaIndexingPipeline:
                 )
 
         return success_count, fail_count
+
+    def verify_metadata(self, sample_size: int = 100) -> MetadataVerificationResult:
+        """Verify metadata integrity of indexed chunks.
+
+        Samples chunks from the collection and checks for required metadata fields.
+
+        Args:
+            sample_size: Number of chunks to sample for verification.
+
+        Returns:
+            MetadataVerificationResult with field coverage statistics.
+        """
+        # Get sample of indexed chunks
+        total_count = self.collection.count()
+        if total_count == 0:
+            logger.warning("Collection is empty, nothing to verify.")
+            return MetadataVerificationResult()
+
+        actual_sample = min(sample_size, total_count)
+        result = self.collection.get(
+            limit=actual_sample,
+            include=["metadatas"],
+        )
+
+        metadatas = result.get("metadatas", [])
+        if not metadatas:
+            return MetadataVerificationResult()
+
+        # Track field presence
+        field_counts: dict = {}
+        chunks_with_missing = 0
+
+        for metadata in metadatas:
+            has_all_required = True
+            for field in REQUIRED_METADATA_FIELDS:
+                if field not in field_counts:
+                    field_counts[field] = 0
+                if field in metadata and metadata[field] not in (None, ""):
+                    field_counts[field] += 1
+                else:
+                    has_all_required = False
+
+            # Also track optional fields (page, section)
+            for field in ("page", "section"):
+                if field not in field_counts:
+                    field_counts[field] = 0
+                if field in metadata and metadata[field] not in (None, ""):
+                    field_counts[field] += 1
+
+            if not has_all_required:
+                chunks_with_missing += 1
+
+        # Calculate coverage percentages
+        field_coverage = {
+            field: round(count / len(metadatas) * 100, 1)
+            for field, count in field_counts.items()
+        }
+
+        verification_result = MetadataVerificationResult(
+            verified_chunks=len(metadatas),
+            missing_fields=chunks_with_missing,
+            field_coverage=field_coverage,
+        )
+
+        logger.info(
+            "Metadata verification: %d chunks sampled, %d with missing required fields.",
+            verification_result.verified_chunks,
+            verification_result.missing_fields,
+        )
+        for field, coverage in field_coverage.items():
+            status = "required" if field in REQUIRED_METADATA_FIELDS else "optional"
+            logger.info("  %s (%s): %.1f%% coverage", field, status, coverage)
+
+        return verification_result

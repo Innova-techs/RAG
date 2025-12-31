@@ -79,7 +79,11 @@ def _parse_pdf_date(date_str: Optional[str]) -> Optional[str]:
 
 
 def load_pdf(path: Path) -> Tuple[str, Dict[str, Any]]:
-    """Load PDF file with error handling for corrupted/invalid files."""
+    """Load PDF file with error handling for corrupted/invalid files.
+
+    Inserts page markers between pages in format [PAGE:N] where N is 1-indexed.
+    This allows downstream chunking to track page boundaries.
+    """
     from PyPDF2 import PdfReader
     from PyPDF2.errors import PdfReadError
 
@@ -127,11 +131,17 @@ def load_pdf(path: Path) -> Tuple[str, Dict[str, Any]]:
         for i, page in enumerate(reader.pages):
             try:
                 text = page.extract_text() or ""
-                pages.append(text.strip())
+                page_text = text.strip()
+                if page_text:
+                    # Add page marker before content (1-indexed)
+                    pages.append(f"[PAGE:{i + 1}]\n{page_text}")
+                else:
+                    # Empty page still gets marker for accurate page tracking
+                    pages.append(f"[PAGE:{i + 1}]")
             except Exception as e:
                 logger.warning(f"Failed to extract page {i + 1} from {path}: {e}")
                 failed_pages.append(i + 1)
-                pages.append("")
+                pages.append(f"[PAGE:{i + 1}]")
 
         if failed_pages:
             metadata["failed_pages"] = failed_pages
