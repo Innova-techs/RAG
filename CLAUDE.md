@@ -58,9 +58,9 @@ data/raw/ (PDF, DOCX, MD, TXT)
 
 **indexing/** - Vector database operations
 - `chroma_store.py`: Chroma persistence with cosine distance
-- `embeddings.py`: SentenceTransformer wrapper (default: all-MiniLM-L6-v2)
+- `embeddings.py`: `EmbeddingService` with retry logic, `EmbeddingConfig`, `EmbeddingError`
 - `dataset.py`: Loads chunks from manifest/JSONL files
-- `pipeline.py`: `ChromaIndexingPipeline` handles batch embedding and upsert
+- `pipeline.py`: `ChromaIndexingPipeline` handles batch embedding and upsert with failure tolerance
 
 **scripts/** - CLI entry points for each pipeline stage
 
@@ -76,8 +76,10 @@ data/raw/ (PDF, DOCX, MD, TXT)
 - Chunk size: 400 tokens
 - Chunk overlap: 80 tokens
 - Embedding model: `sentence-transformers/all-MiniLM-L6-v2`
+- Embedding dimensions: 384
 - Vector metric: Cosine distance
 - Upsert batch size: 32 chunks
+- Embedding retries: 3 (with exponential backoff)
 
 ### Text Normalization
 
