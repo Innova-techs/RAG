@@ -1,12 +1,15 @@
 ﻿from __future__ import annotations
 
 import logging
+import traceback
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
 from .chunker import chunk_document
 from .loader import DocumentLoader, UnsupportedDocumentError, discover_documents
+from .models import FailureInfo
 from .normalizer import NormalizationConfig, TextNormalizer
 from .storage import StorageManager
 
@@ -40,7 +43,10 @@ class PipelineResult:
     skipped: int
     failed: int
     chunk_count: int
-    failures: List[str]
+    failures: List[FailureInfo]
+    start_time: str
+    end_time: str
+    duration_seconds: float
 
 
 class IngestionPipeline:
@@ -66,14 +72,30 @@ class IngestionPipeline:
         self.loader = DocumentLoader(config.input_dir, normalizer=normalizer)
         self.storage = StorageManager(config.output_dir)
 
-    def run(self) -> PipelineResult:
-        documents = discover_documents(self.config.input_dir)
+    def run(self, document_paths: Optional[List[Path]] = None) -> PipelineResult:
+        """Run the ingestion pipeline.
+
+        Args:
+            document_paths: Optional list of specific document paths to process.
+                           If None, discovers all documents in input_dir.
+
+        Returns:
+            PipelineResult with processing statistics and failure details.
+        """
+        start = datetime.utcnow()
+        documents = document_paths or discover_documents(self.config.input_dir)
         processed = skipped = failed = chunk_total = 0
-        failures: List[str] = []
+        failures: List[FailureInfo] = []
 
         if not documents:
             logger.warning("No documents found under %s", self.config.input_dir)
-            return PipelineResult(0, 0, 0, 0, [])
+            end = datetime.utcnow()
+            return PipelineResult(
+                0, 0, 0, 0, [],
+                start.isoformat() + "Z",
+                end.isoformat() + "Z",
+                (end - start).total_seconds(),
+            )
 
         for path in documents:
             try:
@@ -104,15 +126,47 @@ class IngestionPipeline:
                 )
             except UnsupportedDocumentError as exc:
                 failed += 1
-                failures.append(f"{path}: {exc}")
+                failure = FailureInfo(
+                    source_path=str(path),
+                    doc_id=None,
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                    traceback=traceback.format_exc(),
+                    timestamp=datetime.utcnow().isoformat() + "Z",
+                )
+                failures.append(failure)
                 logger.error("Unsupported document: %s", exc)
                 if self.config.fail_fast:
                     raise
             except Exception as exc:  # pylint: disable=broad-except
                 failed += 1
-                failures.append(f"{path}: {exc}")
+                failure = FailureInfo(
+                    source_path=str(path),
+                    doc_id=None,
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                    traceback=traceback.format_exc(),
+                    timestamp=datetime.utcnow().isoformat() + "Z",
+                )
+                failures.append(failure)
                 logger.exception("Failed to process %s", path)
                 if self.config.fail_fast:
                     raise
 
-        return PipelineResult(processed, skipped, failed, chunk_total, failures)
+        end = datetime.utcnow()
+        result = PipelineResult(
+            processed,
+            skipped,
+            failed,
+            chunk_total,
+            failures,
+            start.isoformat() + "Z",
+            end.isoformat() + "Z",
+            (end - start).total_seconds(),
+        )
+
+        # Save failures and report
+        self.storage.save_failures(failures)
+        self.storage.save_report(result)
+
+        return result

@@ -8,6 +8,7 @@ from typing import Optional
 
 from ingestion.normalizer import NormalizationConfig, TextNormalizer
 from ingestion.pipeline import IngestionPipeline, PipelineConfig
+from ingestion.storage import StorageManager
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,6 +32,11 @@ def parse_args() -> argparse.Namespace:
         "--fail-fast",
         action="store_true",
         help="Abort immediately on the first failure instead of logging and continuing.",
+    )
+    parser.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="Retry only documents that failed in a previous run (reads from failures.json).",
     )
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging output.")
 
@@ -140,6 +146,19 @@ def main() -> int:
     args = parse_args()
     configure_logging(args.verbose)
 
+    output_dir = Path(args.output_dir)
+
+    # Handle retry-failed mode
+    document_paths = None
+    if args.retry_failed:
+        storage = StorageManager(output_dir)
+        failures = storage.load_failures()
+        if not failures:
+            logging.info("No failed documents to retry (failures.json is empty or missing)")
+            return 0
+        document_paths = [Path(f.source_path) for f in failures]
+        logging.info("Retrying %d previously failed document(s)", len(document_paths))
+
     # Build normalization configuration
     normalization_config = build_normalization_config(args)
 
@@ -150,7 +169,7 @@ def main() -> int:
 
     config = PipelineConfig(
         input_dir=Path(args.input_dir),
-        output_dir=Path(args.output_dir),
+        output_dir=output_dir,
         chunk_size_tokens=args.chunk_size,
         chunk_overlap_percent=args.chunk_overlap,
         fail_fast=args.fail_fast,
@@ -158,20 +177,27 @@ def main() -> int:
     )
 
     pipeline = IngestionPipeline(config)
-    result = pipeline.run()
+    result = pipeline.run(document_paths=document_paths)
 
-    logging.info(
-        "Ingestion complete: processed=%d skipped=%d failed=%d chunks=%d",
-        result.processed,
-        result.skipped,
-        result.failed,
-        result.chunk_count,
-    )
+    # Print summary
+    logging.info("=" * 60)
+    logging.info("INGESTION SUMMARY")
+    logging.info("=" * 60)
+    logging.info("  Processed:    %d document(s)", result.processed)
+    logging.info("  Skipped:      %d document(s)", result.skipped)
+    logging.info("  Failed:       %d document(s)", result.failed)
+    logging.info("  Total chunks: %d", result.chunk_count)
+    logging.info("  Duration:     %.2f seconds", result.duration_seconds)
+    logging.info("=" * 60)
 
     if result.failures:
-        logging.info("Failure details:")
+        logging.info("FAILURE DETAILS:")
         for failure in result.failures:
-            logging.info(" - %s", failure)
+            logging.error("  [%s] %s", failure.error_type, failure.source_path)
+            logging.error("    Message: %s", failure.error_message)
+        logging.info("See %s for full details", output_dir / "failures.json")
+
+    logging.info("Report saved to: %s", output_dir / "ingestion-report.json")
 
     return 1 if result.failed else 0
 

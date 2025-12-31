@@ -4,9 +4,12 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable
+from typing import TYPE_CHECKING, Dict, Iterable, List
 
-from .models import Document, DocumentChunk
+from .models import Document, DocumentChunk, FailureInfo
+
+if TYPE_CHECKING:
+    from .pipeline import PipelineResult
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +20,8 @@ class StorageManager:
         self.chunks_dir = output_root / "chunks"
         self.logs_dir = output_root / "logs"
         self.manifest_path = output_root / "manifest.json"
+        self.failures_path = output_root / "failures.json"
+        self.report_path = output_root / "ingestion-report.json"
         self.output_root.mkdir(parents=True, exist_ok=True)
         self.chunks_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
@@ -65,3 +70,66 @@ class StorageManager:
         }
         self._manifest[document.doc_id] = manifest_entry
         self._write_manifest()
+
+    def save_failures(self, failures: List[FailureInfo]) -> None:
+        """Save failure information to failures.json.
+
+        Args:
+            failures: List of FailureInfo objects to persist.
+        """
+        data = [f.to_dict() for f in failures]
+        self.failures_path.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        if failures:
+            logger.info("Saved %d failure(s) to %s", len(failures), self.failures_path)
+
+    def load_failures(self) -> List[FailureInfo]:
+        """Load failure information from failures.json.
+
+        Returns:
+            List of FailureInfo objects from previous runs.
+        """
+        if not self.failures_path.exists():
+            return []
+        try:
+            data = json.loads(self.failures_path.read_text(encoding="utf-8"))
+            return [FailureInfo.from_dict(item) for item in data]
+        except (json.JSONDecodeError, KeyError) as exc:
+            logger.warning("Failed to load failures.json: %s", exc)
+            return []
+
+    def clear_failure(self, source_path: str) -> None:
+        """Remove a specific failure entry after successful retry.
+
+        Args:
+            source_path: Path of the document that was successfully processed.
+        """
+        failures = self.load_failures()
+        updated = [f for f in failures if f.source_path != source_path]
+        if len(updated) != len(failures):
+            self.save_failures(updated)
+            logger.info("Cleared failure entry for %s", source_path)
+
+    def save_report(self, result: "PipelineResult") -> None:
+        """Save ingestion report to ingestion-report.json.
+
+        Args:
+            result: PipelineResult containing run statistics.
+        """
+        report = {
+            "run_timestamp": result.start_time,
+            "end_timestamp": result.end_time,
+            "duration_seconds": result.duration_seconds,
+            "processed": result.processed,
+            "skipped": result.skipped,
+            "failed": result.failed,
+            "total_chunks": result.chunk_count,
+            "failures": [f.to_dict() for f in result.failures],
+        }
+        self.report_path.write_text(
+            json.dumps(report, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        logger.info("Saved ingestion report to %s", self.report_path)
