@@ -21,7 +21,7 @@ class PipelineConfig:
         input_dir: Directory containing source documents.
         output_dir: Directory for processed chunks and manifest.
         chunk_size_tokens: Target token count per chunk.
-        chunk_overlap_tokens: Overlapping tokens between chunks.
+        chunk_overlap_percent: Overlap as percentage of chunk size (0.10-0.20).
         fail_fast: Stop on first failure instead of continuing.
         normalization_config: Optional configuration for text normalization.
     """
@@ -29,7 +29,7 @@ class PipelineConfig:
     input_dir: Path
     output_dir: Path
     chunk_size_tokens: int = 400
-    chunk_overlap_tokens: int = 80
+    chunk_overlap_percent: float = 0.15
     fail_fast: bool = False
     normalization_config: Optional[NormalizationConfig] = field(default=None)
 
@@ -86,7 +86,7 @@ class IngestionPipeline:
                 chunks = chunk_document(
                     document,
                     chunk_size_tokens=self.config.chunk_size_tokens,
-                    chunk_overlap_tokens=self.config.chunk_overlap_tokens,
+                    chunk_overlap_percent=self.config.chunk_overlap_percent,
                 )
 
                 if not chunks:

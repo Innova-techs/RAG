@@ -23,9 +23,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--chunk-size", type=int, default=400, help="Approximate target token count per chunk.")
     parser.add_argument(
         "--chunk-overlap",
-        type=int,
-        default=80,
-        help="Approximate overlapping tokens retained between chunks.",
+        type=float,
+        default=0.15,
+        help="Overlap as percentage of chunk size (0.10-0.20, default: 0.15 = 15%%).",
     )
     parser.add_argument(
         "--fail-fast",
@@ -152,7 +152,7 @@ def main() -> int:
         input_dir=Path(args.input_dir),
         output_dir=Path(args.output_dir),
         chunk_size_tokens=args.chunk_size,
-        chunk_overlap_tokens=args.chunk_overlap,
+        chunk_overlap_percent=args.chunk_overlap,
         fail_fast=args.fail_fast,
         normalization_config=normalization_config,
     )
