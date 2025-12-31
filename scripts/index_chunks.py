@@ -76,10 +76,11 @@ def main() -> int:
     result = pipeline.run()
 
     logging.info(
-        "Chroma indexing complete: docs=%d chunks=%d skipped=%d",
+        "Chroma indexing complete: docs=%d chunks=%d skipped=%d failed=%d",
         result.indexed_docs,
         result.indexed_chunks,
         result.skipped_docs,
+        result.failed_chunks,
     )
     return 0
 

@@ -3,13 +3,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
-from chromadb.api.types import Documents, IDs, Metadatas
+from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
 
 from .chroma_store import get_collection
 from .dataset import iter_chunk_records, load_manifest
-from .embeddings import build_embedding_function
+from .embeddings import EmbeddingConfig, EmbeddingError, EmbeddingService
 
 logger = logging.getLogger(__name__)
 
@@ -29,16 +29,22 @@ class IndexingResult:
     indexed_docs: int
     indexed_chunks: int
     skipped_docs: int
+    failed_chunks: int = 0
 
 
 class ChromaIndexingPipeline:
     def __init__(self, config: IndexingConfig):
         self.config = config
-        embedding_function = build_embedding_function(config.embedding_model_name)
+
+        # Initialize embedding service with retry logic
+        embedding_config = EmbeddingConfig(model_name=config.embedding_model_name)
+        self.embedding_service = EmbeddingService(embedding_config)
+
+        # Create collection without embedding function (we pre-compute embeddings)
         self.collection = get_collection(
             config.chroma_dir,
             config.collection_name,
-            embedding_function,
+            embedding_function=None,
         )
 
         self.manifest_path = config.processed_dir / "manifest.json"
@@ -59,6 +65,7 @@ class ChromaIndexingPipeline:
         indexed_docs = 0
         indexed_chunks = 0
         skipped_docs = 0
+        failed_chunks = 0
 
         for doc_id in doc_ids:
             records = list(iter_chunk_records(manifest, self.chunks_dir, [doc_id]))
@@ -69,30 +76,77 @@ class ChromaIndexingPipeline:
 
             logger.info("Re-indexing %s (%d chunks).", doc_id, len(records))
             self.collection.delete(where={"doc_id": doc_id})
-            chunk_count = self._upsert_records(records)
+            success_count, fail_count = self._upsert_records(records)
             indexed_docs += 1
-            indexed_chunks += chunk_count
-            logger.info(
-                "Indexed %s: %d chunks (collection=%s).",
-                doc_id,
-                chunk_count,
-                self.config.collection_name,
-            )
+            indexed_chunks += success_count
+            failed_chunks += fail_count
+            if fail_count > 0:
+                logger.warning(
+                    "Indexed %s: %d chunks succeeded, %d failed (collection=%s).",
+                    doc_id,
+                    success_count,
+                    fail_count,
+                    self.config.collection_name,
+                )
+            else:
+                logger.info(
+                    "Indexed %s: %d chunks (collection=%s).",
+                    doc_id,
+                    success_count,
+                    self.config.collection_name,
+                )
 
         return IndexingResult(
             indexed_docs=indexed_docs,
             indexed_chunks=indexed_chunks,
             skipped_docs=skipped_docs,
+            failed_chunks=failed_chunks,
         )
 
-    def _upsert_records(self, records) -> int:
+    def _upsert_records(self, records) -> Tuple[int, int]:
+        """Upsert records in batches with error handling.
+
+        Pre-computes embeddings using EmbeddingService with retry logic,
+        then upserts to Chroma.
+
+        Returns:
+            Tuple of (success_count, fail_count).
+        """
         batch_size = max(1, self.config.batch_size)
-        chunk_total = 0
+        success_count = 0
+        fail_count = 0
+
         for start in range(0, len(records), batch_size):
             batch = records[start : start + batch_size]
             ids: IDs = [record.chunk_id for record in batch]
             documents: Documents = [record.text for record in batch]
             metadatas: Metadatas = [record.metadata for record in batch]
-            self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
-            chunk_total += len(batch)
-        return chunk_total
+
+            try:
+                # Pre-compute embeddings with retry logic
+                embeddings: Embeddings = self.embedding_service.embed_batch(documents)
+                self.collection.upsert(
+                    ids=ids,
+                    documents=documents,
+                    metadatas=metadatas,
+                    embeddings=embeddings,
+                )
+                success_count += len(batch)
+            except EmbeddingError as exc:
+                fail_count += len(batch)
+                logger.error(
+                    "Failed to embed batch of %d chunks (ids=%s...): %s",
+                    len(batch),
+                    ids[0] if ids else "none",
+                    exc,
+                )
+            except Exception as exc:
+                fail_count += len(batch)
+                logger.error(
+                    "Failed to upsert batch of %d chunks (ids=%s...): %s",
+                    len(batch),
+                    ids[0] if ids else "none",
+                    exc,
+                )
+
+        return success_count, fail_count
