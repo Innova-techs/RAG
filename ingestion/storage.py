@@ -125,6 +125,7 @@ class StorageManager:
             "processed": result.processed,
             "skipped": result.skipped,
             "failed": result.failed,
+            "cleaned_up": result.cleaned_up,
             "total_chunks": result.chunk_count,
             "failures": [f.to_dict() for f in result.failures],
         }
@@ -133,3 +134,60 @@ class StorageManager:
             encoding="utf-8",
         )
         logger.info("Saved ingestion report to %s", self.report_path)
+
+    def find_orphaned_docs(self, current_source_paths: List[str]) -> List[str]:
+        """Find documents in manifest whose source files no longer exist.
+
+        Args:
+            current_source_paths: List of current source file paths.
+
+        Returns:
+            List of doc_ids that are orphaned (source file deleted).
+        """
+        current_paths_set = set(current_source_paths)
+        orphaned = []
+
+        for doc_id, entry in self._manifest.items():
+            source_path = entry.get("source_path")
+            if source_path and source_path not in current_paths_set:
+                # Check if file actually exists on disk
+                if not Path(source_path).exists():
+                    orphaned.append(doc_id)
+
+        return orphaned
+
+    def cleanup_orphaned_docs(self, doc_ids: List[str]) -> int:
+        """Remove orphaned documents from manifest and delete their chunk files.
+
+        Args:
+            doc_ids: List of doc_ids to remove.
+
+        Returns:
+            Number of documents cleaned up.
+        """
+        cleaned = 0
+        for doc_id in doc_ids:
+            if doc_id in self._manifest:
+                # Remove chunk file
+                chunk_file = self.chunks_dir / f"{doc_id}.jsonl"
+                if chunk_file.exists():
+                    chunk_file.unlink()
+                    logger.info("Deleted chunk file: %s", chunk_file)
+
+                # Remove from manifest
+                del self._manifest[doc_id]
+                cleaned += 1
+                logger.info("Removed orphaned document: %s", doc_id)
+
+        if cleaned > 0:
+            self._write_manifest()
+
+        return cleaned
+
+    def get_manifest_doc_ids(self) -> List[str]:
+        """Get all document IDs in the manifest.
+
+        Returns:
+            List of doc_ids currently in manifest.
+        """
+        return list(self._manifest.keys())

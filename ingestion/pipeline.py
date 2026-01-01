@@ -27,6 +27,7 @@ class PipelineConfig:
         chunk_overlap_percent: Overlap as percentage of chunk size (0.10-0.20).
         fail_fast: Stop on first failure instead of continuing.
         normalization_config: Optional configuration for text normalization.
+        cleanup_deleted: Remove orphaned docs whose source files were deleted.
     """
 
     input_dir: Path
@@ -35,6 +36,7 @@ class PipelineConfig:
     chunk_overlap_percent: float = 0.15
     fail_fast: bool = False
     normalization_config: Optional[NormalizationConfig] = field(default=None)
+    cleanup_deleted: bool = False
 
 
 @dataclass
@@ -47,6 +49,7 @@ class PipelineResult:
     start_time: str
     end_time: str
     duration_seconds: float
+    cleaned_up: int = 0
 
 
 class IngestionPipeline:
@@ -153,6 +156,15 @@ class IngestionPipeline:
                 if self.config.fail_fast:
                     raise
 
+        # Cleanup orphaned documents if enabled
+        cleaned_up = 0
+        if self.config.cleanup_deleted:
+            current_paths = [str(p.resolve()) for p in documents]
+            orphaned = self.storage.find_orphaned_docs(current_paths)
+            if orphaned:
+                cleaned_up = self.storage.cleanup_orphaned_docs(orphaned)
+                logger.info("Cleaned up %d orphaned document(s)", cleaned_up)
+
         end = datetime.utcnow()
         result = PipelineResult(
             processed,
@@ -163,6 +175,7 @@ class IngestionPipeline:
             start.isoformat() + "Z",
             end.isoformat() + "Z",
             (end - start).total_seconds(),
+            cleaned_up,
         )
 
         # Save failures and report
