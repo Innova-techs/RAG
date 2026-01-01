@@ -1,10 +1,77 @@
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import chromadb
 from chromadb.api import Collection
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class HealthCheckResult:
+    """Result of a Chroma health check."""
+
+    healthy: bool
+    message: str
+    collection_count: int = 0
+    document_count: int = 0
+
+
+def health_check(persist_path: Path, collection_name: Optional[str] = None) -> HealthCheckResult:
+    """Check if Chroma is healthy and accessible.
+
+    Args:
+        persist_path: Directory for Chroma persistence.
+        collection_name: Optional collection to check. If provided, also checks
+            the collection exists and returns document count.
+
+    Returns:
+        HealthCheckResult with status and details.
+    """
+    try:
+        if not persist_path.exists():
+            return HealthCheckResult(
+                healthy=False,
+                message=f"Persistence path does not exist: {persist_path}",
+            )
+
+        client = chromadb.PersistentClient(path=str(persist_path))
+        collections = client.list_collections()
+        collection_count = len(collections)
+
+        if collection_name:
+            try:
+                collection = client.get_collection(collection_name)
+                doc_count = collection.count()
+                return HealthCheckResult(
+                    healthy=True,
+                    message=f"Chroma healthy. Collection '{collection_name}' has {doc_count} documents.",
+                    collection_count=collection_count,
+                    document_count=doc_count,
+                )
+            except Exception as e:
+                return HealthCheckResult(
+                    healthy=False,
+                    message=f"Collection '{collection_name}' not found: {e}",
+                    collection_count=collection_count,
+                )
+
+        return HealthCheckResult(
+            healthy=True,
+            message=f"Chroma healthy. {collection_count} collection(s) available.",
+            collection_count=collection_count,
+        )
+
+    except Exception as e:
+        logger.exception("Chroma health check failed")
+        return HealthCheckResult(
+            healthy=False,
+            message=f"Chroma health check failed: {e}",
+        )
 
 
 def get_collection(
