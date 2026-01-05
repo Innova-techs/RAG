@@ -7,6 +7,7 @@ from typing import Optional
 
 import chromadb
 from chromadb.api import Collection
+from chromadb.errors import NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +54,17 @@ def health_check(persist_path: Path, collection_name: Optional[str] = None) -> H
                     collection_count=collection_count,
                     document_count=doc_count,
                 )
-            except Exception as e:
+            except NotFoundError:
                 return HealthCheckResult(
                     healthy=False,
-                    message=f"Collection '{collection_name}' not found: {e}",
+                    message=f"Collection '{collection_name}' not found",
+                    collection_count=collection_count,
+                )
+            except Exception as e:
+                logger.exception("Unexpected error checking collection '%s'", collection_name)
+                return HealthCheckResult(
+                    healthy=False,
+                    message=f"Error checking collection '{collection_name}': {e}",
                     collection_count=collection_count,
                 )
 

@@ -35,14 +35,37 @@ python -m scripts.query_chunks --question "Your question here" --k 3 --pretty
 python -m scripts.index_chunks --doc-ids doc-id-1 doc-id-2 --verbose
 ```
 
+### RAG Chat (Query with LLM Response)
+```bash
+# Single question
+python -m scripts.rag_chat --question "What are the key findings?" --k 5
+
+# Interactive chat mode
+python -m scripts.rag_chat --interactive
+
+# Show retrieved sources
+python -m scripts.rag_chat -q "What skills are in demand?" --show-sources
+
+# JSON output
+python -m scripts.rag_chat -q "Summarize the report" --json
+```
+
+**Required environment variables** (in `.env`):
+```
+API_KEY=your_api_key
+API_SECRET=your_api_secret
+BASE_URL=https://your-llm-api-endpoint
+```
+
 ## Architecture
 
 ### Data Flow
 ```
 data/raw/ (PDF, DOCX, MD, TXT)
-    → [ingestion] → data/processed/chunks/*.jsonl + manifest.json + failures.json + ingestion-report.json
-    → [indexing]  → data/vectorstore/ (Chroma)
-    → [query]     → Top-k semantic matches
+    → [ingestion]  → data/processed/chunks/*.jsonl + manifest.json + failures.json + ingestion-report.json
+    → [indexing]   → data/vectorstore/ (Chroma)
+    → [query]      → Top-k semantic matches
+    → [generation] → LLM-powered answers with retrieved context
 ```
 
 ### Package Structure
@@ -62,6 +85,10 @@ data/raw/ (PDF, DOCX, MD, TXT)
 - `dataset.py`: Loads chunks from manifest/JSONL files
 - `pipeline.py`: `ChromaIndexingPipeline` handles batch embedding and upsert with failure tolerance
 
+**generation/** - LLM-powered response generation
+- `api_client.py`: HMAC-authenticated LLM client with `LLMClient`, `LLMConfig`
+- `rag_chain.py`: `RAGChain` combines retrieval and generation
+
 **scripts/** - CLI entry points for each pipeline stage
 
 ### Key Design Patterns
@@ -80,6 +107,9 @@ data/raw/ (PDF, DOCX, MD, TXT)
 - Vector metric: Cosine distance
 - Upsert batch size: 32 chunks
 - Embedding retries: 3 (with exponential backoff)
+- RAG retrieval: Top-5 chunks
+- LLM temperature: 0.7
+- LLM max tokens: 1000
 
 ### Text Normalization
 
