@@ -76,6 +76,61 @@ PY
 - REST endpoint `POST /rag/query` accepts the user question (plus optional context) and returns answer, cited sources (doc_id + snippet or offset), and retrieval metadata.
 - Integration tests cover representative pilot queries.
 
+#### Implementation snapshot
+- `generation/` package provides RAG chain functionality: HMAC-authenticated LLM client (`api_client.py`) and retrieval + generation logic (`rag_chain.py`).
+- `RAGChain` retrieves top-k chunks from Chroma, formats them as context, and sends to the LLM API with a grounding prompt that instructs the model to answer only from provided context.
+- CLI `python -m scripts.rag_chat` supports single questions, interactive chat mode, and JSON output.
+
+#### Setup
+1. Create a `.env` file in the project root with your LLM API credentials:
+   ```
+   API_KEY=your_api_key
+   API_SECRET=your_api_secret
+   BASE_URL=https://your-llm-api-endpoint
+   ```
+
+#### How to run it
+1. Ensure indexing has completed (`data/vectorstore/` exists with indexed chunks).
+2. `pip install -r requirements.txt` (includes `requests` and `python-dotenv`).
+3. Single question:
+   ```bash
+   python -m scripts.rag_chat --question "What are the key job trends for 2025?" --k 5
+   ```
+4. Interactive chat mode:
+   ```bash
+   python -m scripts.rag_chat --interactive
+   ```
+5. Show retrieved sources with the answer:
+   ```bash
+   python -m scripts.rag_chat -q "What skills are most in demand?" --show-sources
+   ```
+6. JSON output for programmatic use:
+   ```bash
+   python -m scripts.rag_chat -q "Summarize the main findings" --json
+   ```
+
+#### CLI Options
+| Option | Description | Default |
+| --- | --- | --- |
+| `--question`, `-q` | Question to ask (omit for interactive mode) | - |
+| `--interactive`, `-i` | Run in interactive chat mode | False |
+| `--k` | Number of chunks to retrieve | 5 |
+| `--max-tokens` | Maximum tokens in LLM response | 1000 |
+| `--temperature` | LLM temperature (0.0-1.0) | 0.7 |
+| `--show-sources` | Display retrieved source chunks | False |
+| `--json` | Output as JSON (single question only) | False |
+| `--vectorstore-dir` | Chroma database directory | data/vectorstore |
+| `--collection-name` | Chroma collection name | pilot-docs |
+
+#### Testing the RAG chain
+```bash
+# Quick test with the demo PDF (WEF Future of Jobs Report 2025)
+python -m scripts.rag_chat -q "What are the most in-demand skills according to the report?" --show-sources
+
+# Verify retrieval is working
+python -m scripts.query_chunks --question "skills demand 2025" --k 3 --pretty
+```
+
 | Attribute | Value |
 | --- | --- |
 | Estimated Effort | 7 dev-days |
