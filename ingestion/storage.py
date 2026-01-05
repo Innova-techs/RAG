@@ -144,15 +144,18 @@ class StorageManager:
         Returns:
             List of doc_ids that are orphaned (source file deleted).
         """
-        current_paths_set = set(current_source_paths)
+        # Normalize all paths to resolved absolute paths for consistent comparison
+        current_paths_set = set(str(Path(p).resolve()) for p in current_source_paths)
         orphaned = []
 
         for doc_id, entry in self._manifest.items():
             source_path = entry.get("source_path")
-            if source_path and source_path not in current_paths_set:
-                # Check if file actually exists on disk
-                if not Path(source_path).exists():
-                    orphaned.append(doc_id)
+            if source_path:
+                resolved_source = str(Path(source_path).resolve())
+                if resolved_source not in current_paths_set:
+                    # Check if file actually exists on disk
+                    if not Path(source_path).exists():
+                        orphaned.append(doc_id)
 
         return orphaned
 
