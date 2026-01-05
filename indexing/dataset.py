@@ -10,6 +10,17 @@ from .models import ChunkRecord
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_metadata(metadata: Dict[str, object]) -> Dict[str, object]:
+    """Ensure metadata values are compatible with Chroma's type constraints."""
+    sanitized: Dict[str, object] = {}
+    for key, value in metadata.items():
+        if value is None or isinstance(value, (str, int, float, bool)):
+            sanitized[key] = value
+        else:
+            sanitized[key] = json.dumps(value, ensure_ascii=False)
+    return sanitized
+
+
 def load_manifest(manifest_path: Path) -> Dict[str, Dict]:
     if not manifest_path.exists():
         raise FileNotFoundError(f"Manifest not found at {manifest_path}")
@@ -89,6 +100,7 @@ def iter_chunk_records(
 
                 # Add remaining chunk metadata
                 metadata.update(chunk_meta)
+                metadata = _sanitize_metadata(metadata)
 
                 yield ChunkRecord(
                     chunk_id=chunk_data["chunk_id"],

@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import chromadb
+from chromadb.utils import embedding_functions
 
 
 def parse_args() -> argparse.Namespace:
@@ -21,6 +22,11 @@ def parse_args() -> argparse.Namespace:
         "--collection-name",
         default="pilot-docs",
         help="Chroma collection to query.",
+    )
+    parser.add_argument(
+        "--embedding-model",
+        default="sentence-transformers/all-MiniLM-L6-v2",
+        help="SentenceTransformer model used to embed query text.",
     )
     parser.add_argument(
         "--question",
@@ -107,7 +113,13 @@ def main() -> int:
         return 1
 
     client = chromadb.PersistentClient(path=str(vectorstore_path))
-    collection = client.get_collection(args.collection_name)
+    embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
+        model_name=args.embedding_model,
+    )
+    collection = client.get_collection(
+        args.collection_name,
+        embedding_function=embedding_fn,
+    )
     result = collection.query(
         query_texts=[args.question],
         n_results=max(1, args.k),
