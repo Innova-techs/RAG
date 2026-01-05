@@ -21,7 +21,7 @@ class TestPDFLoader:
     """Tests for PDF parser functionality."""
 
     def test_load_pdf_single_page(self, tmp_path: Path):
-        """Test PDF with single page extracts text correctly."""
+        """Test PDF with single page extracts text correctly with page marker."""
         with patch("PyPDF2.PdfReader") as mock_reader:
             mock_page = MagicMock()
             mock_page.extract_text.return_value = "Hello World"
@@ -33,7 +33,9 @@ class TestPDFLoader:
 
             text, metadata = load_pdf(pdf_path)
 
-            assert text == "Hello World"
+            # PDF loader now includes page markers for chunk tracking
+            assert "[PAGE:1]" in text
+            assert "Hello World" in text
             assert metadata["page_count"] == 1
             assert metadata["is_encrypted"] is False
 
@@ -115,7 +117,7 @@ class TestPDFLoader:
             assert "Corrupted PDF" in str(exc_info.value)
 
     def test_load_pdf_empty_pages(self, tmp_path: Path):
-        """Test PDF with empty pages handles None text."""
+        """Test PDF with empty pages includes page marker but no content."""
         with patch("PyPDF2.PdfReader") as mock_reader:
             mock_page = MagicMock()
             mock_page.extract_text.return_value = None
@@ -128,7 +130,8 @@ class TestPDFLoader:
 
             text, metadata = load_pdf(pdf_path)
 
-            assert text == ""
+            # Empty pages still get page markers for accurate tracking
+            assert "[PAGE:1]" in text
             assert metadata["page_count"] == 1
 
 

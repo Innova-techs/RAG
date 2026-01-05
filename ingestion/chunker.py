@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .models import Document, DocumentChunk
@@ -11,12 +12,47 @@ DEFAULT_OVERLAP_PERCENT = 0.15  # 15% overlap
 MIN_OVERLAP_PERCENT = 0.10  # 10% minimum
 MAX_OVERLAP_PERCENT = 0.20  # 20% maximum
 
+# Patterns for section and page detection
+_PAGE_MARKER_PATTERN = re.compile(r"^\[PAGE:(\d+)\]$", re.MULTILINE)
+_SECTION_HEADER_PATTERN = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
+
+
+def _extract_page_from_text(text: str) -> Optional[int]:
+    """Extract page number from text containing page markers.
+
+    Returns the first page marker found, or None if no marker exists.
+    """
+    match = _PAGE_MARKER_PATTERN.search(text)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _extract_section_from_text(text: str) -> Optional[str]:
+    """Extract the most recent section header from text.
+
+    Returns the last markdown header found (closest to the content),
+    or None if no headers exist.
+    """
+    matches = list(_SECTION_HEADER_PATTERN.finditer(text))
+    if matches:
+        # Return the last (most recent) header text
+        return matches[-1].group(2).strip()
+    return None
+
+
+def _strip_page_markers(text: str) -> str:
+    """Remove page markers from text for clean chunk content."""
+    return _PAGE_MARKER_PATTERN.sub("", text).strip()
+
 
 def _build_chunk(
     doc: Document,
     units: Sequence[Tuple[str, int, int]],
     chunk_index: int,
     source_metadata: Optional[Dict[str, Any]] = None,
+    current_page: Optional[int] = None,
+    current_section: Optional[str] = None,
 ) -> DocumentChunk:
     """Build a DocumentChunk from a sequence of text units.
 
@@ -25,6 +61,8 @@ def _build_chunk(
         units: List of (text, unit_index, token_count) tuples.
         chunk_index: Index of this chunk in the document.
         source_metadata: Optional metadata from source document (page, section).
+        current_page: Current page number (1-indexed) for PDF documents.
+        current_section: Current section header text.
 
     Returns:
         DocumentChunk with combined text and metadata.
@@ -33,7 +71,19 @@ def _build_chunk(
         raise ValueError("Cannot build chunk from empty buffer.")
 
     texts = [item[0] for item in units]
-    chunk_text = "\n\n".join(texts).strip()
+    raw_chunk_text = "\n\n".join(texts).strip()
+
+    # Extract page/section from chunk content if not provided
+    if current_page is None:
+        current_page = _extract_page_from_text(raw_chunk_text)
+    if current_section is None:
+        current_section = _extract_section_from_text(raw_chunk_text)
+
+    # Clean text by removing page markers
+    chunk_text = _strip_page_markers(raw_chunk_text)
+    # Normalize whitespace after marker removal
+    chunk_text = re.sub(r"\n{3,}", "\n\n", chunk_text).strip()
+
     token_count = count_tokens(chunk_text)
 
     start_unit = units[0][1]
@@ -44,6 +94,12 @@ def _build_chunk(
         "chunk_char_count": len(chunk_text),
         "chunk_token_count": token_count,
     }
+
+    # Add page and section metadata
+    if current_page is not None:
+        metadata["page"] = current_page
+    if current_section is not None:
+        metadata["section"] = current_section
 
     # Propagate source metadata if available
     if source_metadata:
@@ -128,17 +184,37 @@ def chunk_document(
     buffer_tokens = 0
     chunk_index = 0
 
+    # Track current context (page and section) across chunks
+    current_page: Optional[int] = None
+    current_section: Optional[str] = None
+
     # Get source metadata for propagation
     source_metadata = document.metadata if document.metadata else {}
 
     def flush_buffer() -> None:
-        nonlocal buffer, buffer_tokens, chunk_index
+        nonlocal buffer, buffer_tokens, chunk_index, current_page, current_section
         if not buffer:
             return
 
-        chunk = _build_chunk(document, buffer, chunk_index, source_metadata)
+        # Build chunk with current context
+        chunk = _build_chunk(
+            document,
+            buffer,
+            chunk_index,
+            source_metadata,
+            current_page,
+            current_section,
+        )
         chunks.append(chunk)
         chunk_index += 1
+
+        # Update context from the chunk that was just built
+        # This ensures subsequent chunks inherit the context
+        chunk_meta = chunk.metadata
+        if "page" in chunk_meta:
+            current_page = chunk_meta["page"]
+        if "section" in chunk_meta:
+            current_section = chunk_meta["section"]
 
         if chunk_overlap_tokens <= 0:
             buffer = []
@@ -158,6 +234,14 @@ def chunk_document(
         buffer_tokens = sum(item[2] for item in buffer)
 
     for unit, unit_idx, token_count in annotated_units:
+        # Update context from incoming units (for page markers and headers)
+        unit_page = _extract_page_from_text(unit)
+        if unit_page is not None:
+            current_page = unit_page
+        unit_section = _extract_section_from_text(unit)
+        if unit_section is not None:
+            current_section = unit_section
+
         # If adding this unit exceeds chunk size, flush first
         if buffer and buffer_tokens + token_count > chunk_size_tokens:
             flush_buffer()

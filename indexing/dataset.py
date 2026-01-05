@@ -39,18 +39,35 @@ def iter_chunk_records(
                 if not line:
                     continue
                 chunk_data = json.loads(line)
+
+                # Get document-level metadata
+                doc_metadata = doc_entry.get("metadata", {})
+
+                # Build metadata with all required fields for Chroma indexing
                 metadata = {
+                    # Required fields (Issue #14)
                     "doc_id": doc_id,
                     "chunk_index": chunk_data.get("chunk_index"),
                     "chunk_id": chunk_data.get("chunk_id"),
                     "source_path": doc_entry.get("source_path"),
+                    # Document info
                     "relative_path": doc_entry.get("relative_path"),
                     "file_extension": doc_entry.get("file_extension"),
                     "content_hash": doc_entry.get("content_hash"),
                 }
-                metadata.update(doc_entry.get("metadata", {}))
 
+                # Timestamp for freshness queries (only include if present)
+                timestamp = doc_metadata.get("ingestion_timestamp")
+                if timestamp:
+                    metadata["timestamp"] = timestamp
+
+                # Add document-level metadata
+                metadata.update(doc_metadata)
+
+                # Process chunk-level metadata
                 chunk_meta = dict(chunk_data.get("metadata") or {})
+
+                # Handle paragraph span
                 paragraph_span = chunk_meta.pop("paragraph_span", None)
                 if (
                     isinstance(paragraph_span, (list, tuple))
@@ -60,6 +77,17 @@ def iter_chunk_records(
                     metadata["paragraph_end"] = int(paragraph_span[1])
                 elif paragraph_span is not None:
                     metadata["paragraph_span"] = str(paragraph_span)
+
+                # Extract page and section from chunk metadata (added by chunker)
+                page = chunk_meta.pop("page", None)
+                if page is not None:
+                    metadata["page"] = int(page)
+
+                section = chunk_meta.pop("section", None)
+                if section is not None:
+                    metadata["section"] = str(section)
+
+                # Add remaining chunk metadata
                 metadata.update(chunk_meta)
 
                 yield ChunkRecord(
