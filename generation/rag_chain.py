@@ -10,6 +10,7 @@ import chromadb
 from chromadb.utils import embedding_functions
 
 from generation.api_client import LLMClient, LLMConfig
+from indexing.embeddings import get_model_path
 
 
 DEFAULT_SYSTEM_PROMPT = """You are a helpful assistant that answers questions based on the provided context.
@@ -82,8 +83,10 @@ class RAGChain:
             self._chroma_client = chromadb.PersistentClient(
                 path=str(self.config.vectorstore_dir)
             )
+            # Resolve model path (prefers local model if available)
+            resolved_model = get_model_path(self.config.embedding_model)
             embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name=self.config.embedding_model,
+                model_name=resolved_model,
             )
             self._collection = self._chroma_client.get_collection(
                 self.config.collection_name,

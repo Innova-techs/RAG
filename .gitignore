@@ -210,6 +210,9 @@ __marimo__/
 data/processed/
 data/vectorstore/
 
+# Local embedding models are checked in for offline/corporate use
+# (model is ~80MB, within GitHub limits)
+
 # Claude Code
 .claude/
 CLAUDE.md
