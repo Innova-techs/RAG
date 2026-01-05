@@ -38,6 +38,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Retry only documents that failed in a previous run (reads from failures.json).",
     )
+    parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="Remove orphaned documents whose source files have been deleted.",
+    )
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging output.")
 
     # Normalization arguments
@@ -174,6 +179,7 @@ def main() -> int:
         chunk_overlap_percent=args.chunk_overlap,
         fail_fast=args.fail_fast,
         normalization_config=normalization_config,
+        cleanup_deleted=args.cleanup,
     )
 
     pipeline = IngestionPipeline(config)
@@ -186,6 +192,8 @@ def main() -> int:
     logging.info("  Processed:    %d document(s)", result.processed)
     logging.info("  Skipped:      %d document(s)", result.skipped)
     logging.info("  Failed:       %d document(s)", result.failed)
+    if result.cleaned_up > 0:
+        logging.info("  Cleaned up:   %d orphaned document(s)", result.cleaned_up)
     logging.info("  Total chunks: %d", result.chunk_count)
     logging.info("  Duration:     %.2f seconds", result.duration_seconds)
     logging.info("=" * 60)
