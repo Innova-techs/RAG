@@ -153,3 +153,14 @@ python -m scripts.ingest --fail-fast --input-dir data/raw --output-dir data/proc
 - `error_message`: Error description
 - `traceback`: Full stack trace for debugging
 - `timestamp`: When the failure occurred
+
+### Migration Notes
+
+#### Chunk Metadata Indexing (PR #48)
+- **New metadata fields**: `page`, `section`, `timestamp` added to indexed chunks
+- **Backward compatibility**: Existing chunks will not have `page`/`section` metadata until documents are re-ingested
+- **Recommendation**: Re-run ingestion and indexing pipelines to populate new metadata for all documents:
+  ```bash
+  python -m scripts.ingest --input-dir data/raw --output-dir data/processed --verbose
+  python -m scripts.index_chunks --processed-dir data/processed --chroma-dir data/vectorstore --verbose
+  ```

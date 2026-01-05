@@ -227,20 +227,24 @@ class TestMetadataVerification:
             pipeline.collection = MagicMock()
             pipeline.collection.count.return_value = 10
 
-            # Mock get response with complete metadata
-            pipeline.collection.get.return_value = {
-                "metadatas": [
-                    {
-                        "doc_id": "doc-1",
-                        "source_path": "/path/to/doc",
-                        "chunk_index": 0,
-                        "timestamp": "2024-01-01T00:00:00Z",
-                        "page": 1,
-                        "section": "Introduction",
-                    }
-                    for _ in range(10)
-                ]
-            }
+            # Mock get responses: first call returns IDs, second returns metadata
+            chunk_ids = [f"chunk-{i}" for i in range(10)]
+            pipeline.collection.get.side_effect = [
+                {"ids": chunk_ids},  # First call: get IDs
+                {  # Second call: get metadata for sampled IDs
+                    "metadatas": [
+                        {
+                            "doc_id": "doc-1",
+                            "source_path": "/path/to/doc",
+                            "chunk_index": 0,
+                            "timestamp": "2024-01-01T00:00:00Z",
+                            "page": 1,
+                            "section": "Introduction",
+                        }
+                        for _ in range(10)
+                    ]
+                },
+            ]
 
             result = pipeline.verify_metadata(sample_size=10)
             assert isinstance(result, MetadataVerificationResult)
@@ -259,16 +263,20 @@ class TestMetadataVerification:
             pipeline.collection = MagicMock()
             pipeline.collection.count.return_value = 5
 
-            # Mock get response with incomplete metadata
-            pipeline.collection.get.return_value = {
-                "metadatas": [
-                    {"doc_id": "doc-1"},  # Missing required fields
-                    {"doc_id": "doc-2", "source_path": "/path", "chunk_index": 0, "timestamp": "2024-01-01"},
-                    {"doc_id": "doc-3"},  # Missing required fields
-                    {"doc_id": "doc-4", "source_path": "/path", "chunk_index": 1, "timestamp": "2024-01-01"},
-                    {"doc_id": "doc-5"},  # Missing required fields
-                ]
-            }
+            # Mock get responses: first call returns IDs, second returns metadata
+            chunk_ids = [f"chunk-{i}" for i in range(5)]
+            pipeline.collection.get.side_effect = [
+                {"ids": chunk_ids},  # First call: get IDs
+                {  # Second call: get metadata for sampled IDs
+                    "metadatas": [
+                        {"doc_id": "doc-1"},  # Missing required fields
+                        {"doc_id": "doc-2", "source_path": "/path", "chunk_index": 0, "timestamp": "2024-01-01"},
+                        {"doc_id": "doc-3"},  # Missing required fields
+                        {"doc_id": "doc-4", "source_path": "/path", "chunk_index": 1, "timestamp": "2024-01-01"},
+                        {"doc_id": "doc-5"},  # Missing required fields
+                    ]
+                },
+            ]
 
             result = pipeline.verify_metadata(sample_size=5)
             assert result.verified_chunks == 5

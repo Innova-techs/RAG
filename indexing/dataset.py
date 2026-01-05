@@ -50,13 +50,16 @@ def iter_chunk_records(
                     "chunk_index": chunk_data.get("chunk_index"),
                     "chunk_id": chunk_data.get("chunk_id"),
                     "source_path": doc_entry.get("source_path"),
-                    # Timestamp for freshness queries (use ingestion_timestamp)
-                    "timestamp": doc_metadata.get("ingestion_timestamp", ""),
                     # Document info
                     "relative_path": doc_entry.get("relative_path"),
                     "file_extension": doc_entry.get("file_extension"),
                     "content_hash": doc_entry.get("content_hash"),
                 }
+
+                # Timestamp for freshness queries (only include if present)
+                timestamp = doc_metadata.get("ingestion_timestamp")
+                if timestamp:
+                    metadata["timestamp"] = timestamp
 
                 # Add document-level metadata
                 metadata.update(doc_metadata)

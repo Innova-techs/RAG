@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
@@ -191,9 +192,20 @@ class ChromaIndexingPipeline:
             logger.warning("Collection is empty, nothing to verify.")
             return MetadataVerificationResult()
 
-        actual_sample = min(sample_size, total_count)
+        # Get all chunk IDs for random sampling
+        all_ids_result = self.collection.get(include=[])
+        all_ids = all_ids_result.get("ids", [])
+
+        if not all_ids:
+            logger.warning("No chunk IDs found in collection.")
+            return MetadataVerificationResult()
+
+        # Randomly sample IDs to avoid insertion-order bias
+        actual_sample = min(sample_size, len(all_ids))
+        sampled_ids = random.sample(all_ids, actual_sample)
+
         result = self.collection.get(
-            limit=actual_sample,
+            ids=sampled_ids,
             include=["metadatas"],
         )
 
@@ -238,8 +250,9 @@ class ChromaIndexingPipeline:
         )
 
         logger.info(
-            "Metadata verification: %d chunks sampled, %d with missing required fields.",
+            "Metadata verification: %d chunks randomly sampled from %d total, %d with missing required fields.",
             verification_result.verified_chunks,
+            total_count,
             verification_result.missing_fields,
         )
         for field, coverage in field_coverage.items():
