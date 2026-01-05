@@ -44,12 +44,16 @@ class DocumentParseError(Exception):
         self.partial_content = partial_content
 
 
-def _parse_pdf_date(date_str: Optional[str]) -> Optional[str]:
+def _parse_pdf_date(date_str: Optional[object]) -> Optional[str]:
     """Parse PDF date string to ISO format.
 
     PDF dates are typically in format: D:YYYYMMDDHHmmSS+HH'mm'
     """
     if not date_str:
+        return None
+    if isinstance(date_str, datetime):
+        return date_str.isoformat()
+    if not isinstance(date_str, str):
         return None
 
     # Remove 'D:' prefix if present
