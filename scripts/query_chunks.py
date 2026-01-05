@@ -8,6 +8,8 @@ from pathlib import Path
 import chromadb
 from chromadb.utils import embedding_functions
 
+from indexing.embeddings import get_model_path
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -113,8 +115,10 @@ def main() -> int:
         return 1
 
     client = chromadb.PersistentClient(path=str(vectorstore_path))
+    # Resolve model path (prefers local model if available)
+    resolved_model = get_model_path(args.embedding_model)
     embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-        model_name=args.embedding_model,
+        model_name=resolved_model,
     )
     collection = client.get_collection(
         args.collection_name,

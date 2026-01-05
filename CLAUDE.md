@@ -111,6 +111,24 @@ data/raw/ (PDF, DOCX, MD, TXT)
 - LLM temperature: 0.7
 - LLM max tokens: 1000
 
+### Local Embedding Model (Offline/Corporate Environments)
+
+For environments with SSL issues or no internet access, download the model once and use locally:
+
+**Download the model** (from a machine with internet):
+```bash
+python -m scripts.download_model --output-dir models
+```
+
+**The model will be saved to:** `models/sentence-transformers_all-MiniLM-L6-v2/`
+
+**Usage:** The code automatically detects local models in `models/` directory. No configuration changes needed.
+
+**Manual override:** Set environment variable:
+```bash
+set EMBEDDING_MODEL_PATH=models/sentence-transformers_all-MiniLM-L6-v2
+```
+
 ### Text Normalization
 
 The ingestion pipeline includes configurable text normalization applied after document parsing:

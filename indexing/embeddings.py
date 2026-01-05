@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional
 
 from chromadb.utils import embedding_functions
@@ -13,10 +15,45 @@ logger = logging.getLogger(__name__)
 MODEL_DIMENSIONS = {
     "sentence-transformers/all-MiniLM-L6-v2": 384,
     "all-MiniLM-L6-v2": 384,
+    "models/sentence-transformers_all-MiniLM-L6-v2": 384,
 }
 
 DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+DEFAULT_LOCAL_MODEL = "models/sentence-transformers_all-MiniLM-L6-v2"
 DEFAULT_DIMENSIONS = 384
+
+
+def get_model_path(model_name: str) -> str:
+    """Resolve model path, preferring local models if available.
+
+    Args:
+        model_name: Model name or path.
+
+    Returns:
+        Resolved model path (local if exists, otherwise original name).
+    """
+    # If it's already a local path that exists, use it
+    if Path(model_name).exists():
+        logger.info("Using local model: %s", model_name)
+        return model_name
+
+    # Check for local model in models/ directory
+    local_model_name = model_name.replace("/", "_")
+    local_path = Path("models") / local_model_name
+
+    if local_path.exists():
+        logger.info("Found local model: %s", local_path)
+        return str(local_path)
+
+    # Check environment variable for model path
+    env_model_path = os.getenv("EMBEDDING_MODEL_PATH")
+    if env_model_path and Path(env_model_path).exists():
+        logger.info("Using model from EMBEDDING_MODEL_PATH: %s", env_model_path)
+        return env_model_path
+
+    # Fall back to downloading from HuggingFace
+    logger.info("Using remote model: %s", model_name)
+    return model_name
 
 
 class EmbeddingError(Exception):
@@ -112,7 +149,11 @@ class EmbeddingService:
 
 
 def build_embedding_function(model_name: str):
-    """Create a SentenceTransformer embedding function for Chroma."""
+    """Create a SentenceTransformer embedding function for Chroma.
+
+    Automatically resolves to local model if available in models/ directory.
+    """
+    resolved_path = get_model_path(model_name)
     return embedding_functions.SentenceTransformerEmbeddingFunction(
-        model_name=model_name,
+        model_name=resolved_path,
     )

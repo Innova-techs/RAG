@@ -210,6 +210,10 @@ __marimo__/
 data/processed/
 data/vectorstore/
 
+# Local embedding models (large files, download via scripts/download_model.py)
+models/*
+!models/README.md
+
 # Claude Code
 .claude/
 CLAUDE.md
