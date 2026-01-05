@@ -11,10 +11,17 @@ logger = logging.getLogger(__name__)
 
 
 def _sanitize_metadata(metadata: Dict[str, object]) -> Dict[str, object]:
-    """Ensure metadata values are compatible with Chroma's type constraints."""
+    """Ensure metadata values are compatible with Chroma's type constraints.
+
+    Chroma requires metadata values to be str, int, float, or bool.
+    Complex types (lists, dicts) are serialized to JSON strings.
+    None values are omitted.
+    """
     sanitized: Dict[str, object] = {}
     for key, value in metadata.items():
-        if value is None or isinstance(value, (str, int, float, bool)):
+        if value is None:
+            continue  # Chroma doesn't accept None
+        elif isinstance(value, (str, int, float, bool)):
             sanitized[key] = value
         else:
             sanitized[key] = json.dumps(value, ensure_ascii=False)
