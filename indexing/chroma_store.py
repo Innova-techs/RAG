@@ -1,3 +1,20 @@
+"""Chroma vector store operations.
+
+This module provides functions for interacting with the Chroma vector database.
+
+Collection Schema:
+    See Docs/vector-collection-schema.md for full schema documentation.
+
+    Key metadata fields stored with each chunk:
+    - doc_id: Unique document identifier
+    - chunk_id: Deterministic chunk ID ({doc_id}::chunk-{index})
+    - source_path: Path to source document
+    - timestamp: Ingestion timestamp for freshness (when present)
+    - page, section: Location info for citations
+    - acl_read, acl_write: Access control placeholders (future)
+
+    Distance metric: cosine (semantic similarity)
+"""
 from __future__ import annotations
 
 import logging
