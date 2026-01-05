@@ -79,6 +79,15 @@ def iter_chunk_records(
                 if timestamp:
                     metadata["timestamp"] = timestamp
 
+                # ACL placeholder fields for future access control
+                acl_read = doc_metadata.get("acl_read")
+                if acl_read:
+                    metadata["acl_read"] = acl_read
+
+                acl_write = doc_metadata.get("acl_write")
+                if acl_write:
+                    metadata["acl_write"] = acl_write
+
                 # Add document-level metadata
                 metadata.update(doc_metadata)
 
