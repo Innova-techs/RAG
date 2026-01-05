@@ -210,5 +210,6 @@ __marimo__/
 data/processed/
 data/vectorstore/
 
-# Claude local settings
-.claude/settings.local.json
+# Claude Code
+.claude/
+CLAUDE.md
