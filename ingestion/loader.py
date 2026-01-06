@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import re
+import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -292,6 +293,144 @@ def _parse_yaml_frontmatter(content: str) -> Tuple[Dict[str, Any], str]:
     return frontmatter, remaining_content
 
 
+def load_excel(path: Path) -> Tuple[str, Dict[str, Any]]:
+    """Load Excel file (.xlsx, .xls) with error handling.
+
+    Inserts sheet markers between sheets in format [SHEET:sheet_name].
+    Converts rows to pipe-separated text representation.
+    """
+    import openpyxl
+    from openpyxl.utils.exceptions import InvalidFileException
+
+    sheets_content = []
+    metadata = {}
+    total_rows = 0
+
+    try:
+        workbook = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
+
+        # Extract workbook metadata
+        if workbook.properties:
+            props = workbook.properties
+            if props.title:
+                metadata["title"] = props.title
+            if props.creator:
+                metadata["author"] = props.creator
+            if props.created:
+                metadata["creation_date"] = props.created.isoformat()
+            if props.modified:
+                metadata["modification_date"] = props.modified.isoformat()
+            if props.subject:
+                metadata["subject"] = props.subject
+            if props.keywords:
+                metadata["keywords"] = props.keywords
+
+        # Fallback: use filename as title if not in metadata
+        if "title" not in metadata:
+            metadata["title"] = path.stem
+
+        sheet_names = workbook.sheetnames
+        metadata["sheet_names"] = sheet_names
+        metadata["sheet_count"] = len(sheet_names)
+
+        for sheet_name in sheet_names:
+            sheet = workbook[sheet_name]
+            rows_text = []
+
+            for row in sheet.iter_rows(values_only=True):
+                # Convert cell values to strings, handling None
+                cell_values = [str(cell) if cell is not None else "" for cell in row]
+                # Skip completely empty rows
+                if any(cell_values):
+                    rows_text.append(" | ".join(cell_values))
+                    total_rows += 1
+
+            if rows_text:
+                sheet_content = f"[SHEET:{sheet_name}]\n" + "\n".join(rows_text)
+                sheets_content.append(sheet_content)
+            else:
+                # Empty sheet still gets marker
+                sheets_content.append(f"[SHEET:{sheet_name}]")
+
+        workbook.close()
+        metadata["row_count"] = total_rows
+
+    except InvalidFileException as e:
+        logger.error(f"Invalid Excel file: {path} - {e}")
+        raise DocumentParseError(f"Invalid Excel file: {e}", path)
+    except zipfile.BadZipFile as e:
+        logger.error(f"Corrupted Excel file (bad zip): {path} - {e}")
+        raise DocumentParseError(f"Corrupted Excel file: {e}", path)
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "password" in error_msg or "encrypted" in error_msg:
+            logger.warning(f"Password-protected Excel file: {path}")
+            metadata["parse_warning"] = "password_protected"
+            return "", metadata
+        logger.error(f"Failed to read Excel file: {path} - {e}")
+        raise DocumentParseError(f"Excel read error: {e}", path)
+
+    return "\n\n".join(sheets_content), metadata
+
+
+def load_excel_xls(path: Path) -> Tuple[str, Dict[str, Any]]:
+    """Load legacy Excel file (.xls) using xlrd.
+
+    Inserts sheet markers between sheets in format [SHEET:sheet_name].
+    Converts rows to pipe-separated text representation.
+    """
+    import xlrd
+
+    sheets_content = []
+    metadata = {}
+    total_rows = 0
+
+    try:
+        workbook = xlrd.open_workbook(str(path))
+
+        # Fallback: use filename as title
+        metadata["title"] = path.stem
+
+        sheet_names = workbook.sheet_names()
+        metadata["sheet_names"] = sheet_names
+        metadata["sheet_count"] = len(sheet_names)
+
+        for sheet_name in sheet_names:
+            sheet = workbook.sheet_by_name(sheet_name)
+            rows_text = []
+
+            for row_idx in range(sheet.nrows):
+                row = sheet.row_values(row_idx)
+                # Convert cell values to strings
+                cell_values = [str(cell) if cell else "" for cell in row]
+                # Skip completely empty rows
+                if any(cell_values):
+                    rows_text.append(" | ".join(cell_values))
+                    total_rows += 1
+
+            if rows_text:
+                sheet_content = f"[SHEET:{sheet_name}]\n" + "\n".join(rows_text)
+                sheets_content.append(sheet_content)
+            else:
+                sheets_content.append(f"[SHEET:{sheet_name}]")
+
+        metadata["row_count"] = total_rows
+
+    except xlrd.biffh.XLRDError as e:
+        logger.error(f"Invalid XLS file: {path} - {e}")
+        raise DocumentParseError(f"Invalid XLS file: {e}", path)
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "password" in error_msg or "encrypted" in error_msg:
+            logger.warning(f"Password-protected XLS file: {path}")
+            metadata["parse_warning"] = "password_protected"
+            return "", metadata
+        logger.error(f"Failed to read XLS file: {path} - {e}")
+        raise DocumentParseError(f"XLS read error: {e}", path)
+
+    return "\n\n".join(sheets_content), metadata
+
+
 def load_markdown(path: Path) -> Tuple[str, Dict[str, Any]]:
     """Load Markdown/text file with structure-aware parsing and error handling."""
     metadata = {}
@@ -391,6 +530,8 @@ def load_markdown(path: Path) -> Tuple[str, Dict[str, Any]]:
 HANDLERS: Dict[str, Callable[[Path], Tuple[str, Dict[str, Any]]]] = {
     ".pdf": load_pdf,
     ".docx": load_docx,
+    ".xlsx": load_excel,
+    ".xls": load_excel_xls,
     ".md": load_markdown,
     ".txt": load_markdown,
 }

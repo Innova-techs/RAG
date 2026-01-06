@@ -61,7 +61,7 @@ BASE_URL=https://your-llm-api-endpoint
 
 ### Data Flow
 ```
-data/raw/ (PDF, DOCX, MD, TXT)
+data/raw/ (PDF, DOCX, XLSX, XLS, MD, TXT)
     → [ingestion]  → data/processed/chunks/*.jsonl + manifest.json + failures.json + ingestion-report.json
     → [indexing]   → data/vectorstore/ (Chroma)
     → [query]      → Top-k semantic matches
@@ -71,7 +71,7 @@ data/raw/ (PDF, DOCX, MD, TXT)
 ### Package Structure
 
 **ingestion/** - Document parsing and chunking
-- `loader.py`: Multi-format document loading (PDF via PyPDF2, DOCX via python-docx)
+- `loader.py`: Multi-format document loading (PDF via PyPDF2, DOCX via python-docx, Excel via openpyxl/xlrd)
 - `chunker.py`: Paragraph-aware chunking (~400 tokens, 80-token overlap)
 - `storage.py`: JSONL chunk persistence, manifest tracking, failure/report storage
 - `pipeline.py`: `IngestionPipeline` orchestrates discover → load → chunk → store
@@ -128,6 +128,31 @@ python -m scripts.download_model --output-dir models
 ```bash
 set EMBEDDING_MODEL_PATH=models/sentence-transformers_all-MiniLM-L6-v2
 ```
+
+### Excel File Support
+
+The ingestion pipeline supports Excel files (.xlsx and .xls):
+
+**Libraries:**
+- `openpyxl` - for .xlsx files (modern Excel format)
+- `xlrd` - for .xls files (legacy Excel format)
+
+**Sheet Handling:**
+- All sheets in the workbook are processed
+- Sheet markers `[SHEET:sheet_name]` separate content between sheets
+- Rows are converted to pipe-separated text (similar to DOCX tables)
+
+**Extracted Metadata:**
+- `title`: Workbook title or filename
+- `author`: Document creator
+- `creation_date` / `modification_date`: Document timestamps
+- `sheet_names`: List of all sheet names
+- `sheet_count`: Number of sheets
+- `row_count`: Total rows across all sheets
+
+**Error Handling:**
+- Password-protected files return empty content with `parse_warning: password_protected`
+- Corrupted files raise `DocumentParseError`
 
 ### Text Normalization
 
