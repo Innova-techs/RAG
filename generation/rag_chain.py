@@ -9,7 +9,7 @@ from typing import Optional
 import chromadb
 from chromadb.utils import embedding_functions
 
-from generation.api_client import LLMClient, LLMConfig
+from .base import BaseLLMClient
 from indexing.embeddings import get_model_path
 
 
@@ -63,13 +63,14 @@ class RAGChain:
 
     def __init__(
         self,
-        llm_client: LLMClient,
+        llm_client: BaseLLMClient,
         config: Optional[RAGConfig] = None,
     ):
         """Initialize the RAG chain.
 
         Args:
-            llm_client: LLM client for generation.
+            llm_client: LLM client for generation. Can be any client
+                       implementing the BaseLLMClient protocol.
             config: RAG configuration.
         """
         self.llm_client = llm_client
