@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-from generation.api_client import LLMClient, LLMConfig
+from generation import ProviderError, create_llm_client, get_available_providers
 from generation.rag_chain import RAGChain, RAGConfig
 
 
@@ -76,6 +77,13 @@ def parse_args() -> argparse.Namespace:
         default=".env",
         help="Path to .env file with API credentials.",
     )
+    parser.add_argument(
+        "--provider",
+        "-p",
+        choices=get_available_providers(),
+        help=f"LLM provider to use. Options: {', '.join(get_available_providers())}. "
+             "Overrides LLM_PROVIDER env var.",
+    )
     return parser.parse_args()
 
 
@@ -97,18 +105,17 @@ def main() -> int:
         print("  python -m scripts.index_chunks --processed-dir data/processed", file=sys.stderr)
         return 1
 
-    # Initialize LLM client
+    # Initialize LLM client using factory
+    provider = args.provider  # None means use env var or default
     try:
-        llm_config = LLMConfig.from_env()
-    except ValueError as e:
+        llm_client = create_llm_client(provider)
+        provider_name = provider or os.getenv("LLM_PROVIDER", "custom")
+        print(f"[info] Using LLM provider: {provider_name}", file=sys.stderr)
+    except ProviderError as e:
         print(f"[error] {e}", file=sys.stderr)
-        print("\nRequired environment variables:", file=sys.stderr)
-        print("  API_KEY - Your API key", file=sys.stderr)
-        print("  API_SECRET - Your API secret", file=sys.stderr)
-        print("  BASE_URL - API base URL", file=sys.stderr)
+        print(f"\nAvailable providers: {', '.join(get_available_providers())}", file=sys.stderr)
+        print("\nSet LLM_PROVIDER env var or use --provider flag.", file=sys.stderr)
         return 1
-
-    llm_client = LLMClient(llm_config)
 
     # Initialize RAG chain
     rag_config = RAGConfig(
