@@ -61,7 +61,7 @@ BASE_URL=https://your-llm-api-endpoint
 
 ### Data Flow
 ```
-data/raw/ (PDF, DOCX, MD, TXT)
+data/raw/ (PDF, DOCX, XLSX, XLS, MD, TXT)
     → [ingestion]  → data/processed/chunks/*.jsonl + manifest.json + failures.json + ingestion-report.json
     → [indexing]   → data/vectorstore/ (Chroma)
     → [query]      → Top-k semantic matches
@@ -71,7 +71,7 @@ data/raw/ (PDF, DOCX, MD, TXT)
 ### Package Structure
 
 **ingestion/** - Document parsing and chunking
-- `loader.py`: Multi-format document loading (PDF via PyPDF2, DOCX via python-docx)
+- `loader.py`: Multi-format document loading (PDF via PyPDF2, DOCX via python-docx, Excel via openpyxl)
 - `chunker.py`: Paragraph-aware chunking (~400 tokens, 80-token overlap)
 - `storage.py`: JSONL chunk persistence, manifest tracking, failure/report storage
 - `pipeline.py`: `IngestionPipeline` orchestrates discover → load → chunk → store
@@ -128,6 +128,47 @@ python -m scripts.download_model --output-dir models
 ```bash
 set EMBEDDING_MODEL_PATH=models/sentence-transformers_all-MiniLM-L6-v2
 ```
+
+### Excel File Support
+
+The ingestion pipeline supports Excel workbooks (.xlsx and .xls formats) via the `openpyxl` library:
+
+**Supported Formats:**
+- `.xlsx` - Excel 2010+ (Office Open XML)
+- `.xls` - Excel 97-2003 (Legacy format)
+
+**Sheet Handling:**
+- All sheets in the workbook are processed sequentially
+- Each sheet is prefixed with a `[SHEET:sheet_name]` marker (similar to `[PAGE:N]` for PDFs)
+- Sheets are separated by double newlines in the output
+
+**Row Format:**
+- Each row is converted to pipe-separated values (e.g., `Col1 | Col2 | Col3`)
+- Empty rows are skipped
+- Cell values are trimmed of whitespace
+- Formulas return their computed values (not the formula text)
+
+**Metadata Extracted:**
+- `title`: From document properties or filename fallback
+- `author`: Document creator
+- `creation_date` / `modification_date`: Timestamps
+- `sheet_names`: List of all sheet names in the workbook
+- `sheet_count`: Number of sheets
+- `total_rows`: Sum of non-empty rows across all sheets
+- `total_columns`: Maximum column count across sheets
+
+**Example Usage:**
+```bash
+# Ingest Excel files along with other documents
+python -m scripts.ingest --input-dir data/raw --output-dir data/processed --verbose
+
+# The pipeline automatically detects and processes .xlsx and .xls files
+```
+
+**Error Handling:**
+- Corrupted files raise `DocumentParseError`
+- Password-protected workbooks are detected and reported
+- Partial extraction continues if individual sheets fail
 
 ### Text Normalization
 

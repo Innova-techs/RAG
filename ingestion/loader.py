@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 import logging
@@ -388,9 +388,101 @@ def load_markdown(path: Path) -> Tuple[str, Dict[str, Any]]:
     return content, metadata
 
 
+
+def load_excel(path: Path) -> Tuple[str, Dict[str, Any]]:
+    """Load Excel file (.xlsx, .xls) with multi-sheet support.
+
+    Inserts sheet markers between sheets in format [SHEET:sheet_name].
+    Rows are converted to pipe-separated text (similar to DOCX tables).
+    """
+    import openpyxl
+    from openpyxl.utils.exceptions import InvalidFileException
+
+    content_parts = []
+    metadata = {}
+    total_rows = 0
+    max_columns = 0
+
+    try:
+        # Load workbook (data_only=True to get values instead of formulas)
+        workbook = openpyxl.load_workbook(str(path), data_only=True, read_only=True)
+
+        sheet_names = workbook.sheetnames
+        metadata["sheet_names"] = sheet_names
+        metadata["sheet_count"] = len(sheet_names)
+
+        # Extract document properties if available
+        if workbook.properties:
+            props = workbook.properties
+            if props.title:
+                metadata["title"] = props.title
+            if props.creator:
+                metadata["author"] = props.creator
+            if props.created:
+                metadata["creation_date"] = props.created.isoformat()
+            if props.modified:
+                metadata["modification_date"] = props.modified.isoformat()
+            if props.subject:
+                metadata["subject"] = props.subject
+            if props.keywords:
+                metadata["keywords"] = props.keywords
+
+        # Fallback: use filename as title if not in metadata
+        if "title" not in metadata:
+            metadata["title"] = path.stem
+
+        # Process each sheet
+        for sheet_name in sheet_names:
+            sheet = workbook[sheet_name]
+            sheet_rows = []
+
+            for row in sheet.iter_rows():
+                # Convert cell values to strings, handling None
+                row_values = []
+                for cell in row:
+                    if cell.value is not None:
+                        row_values.append(str(cell.value).strip())
+                    else:
+                        row_values.append("")
+
+                # Only include row if it has any non-empty values
+                if any(row_values):
+                    sheet_rows.append(" | ".join(row_values))
+                    max_columns = max(max_columns, len(row_values))
+
+            total_rows += len(sheet_rows)
+
+            # Add sheet content with marker
+            if sheet_rows:
+                sheet_content = "[SHEET:" + sheet_name + "]" + chr(10) + chr(10).join(sheet_rows)
+                content_parts.append(sheet_content)
+            else:
+                # Empty sheet still gets marker
+                content_parts.append("[SHEET:" + sheet_name + "]")
+
+        workbook.close()
+
+        metadata["total_rows"] = total_rows
+        metadata["total_columns"] = max_columns
+
+    except InvalidFileException as e:
+        logger.error(f"Invalid or corrupted Excel file: {path} - {e}")
+        raise DocumentParseError(f"Corrupted Excel file: {e}", path)
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "password" in error_msg or "encrypted" in error_msg:
+            logger.error(f"Password-protected Excel file: {path}")
+            raise DocumentParseError("Password-protected Excel file", path)
+        logger.error(f"Failed to read Excel file: {path} - {e}")
+        raise DocumentParseError(f"Excel read error: {e}", path)
+
+    return (chr(10) + chr(10)).join(content_parts), metadata
+
 HANDLERS: Dict[str, Callable[[Path], Tuple[str, Dict[str, Any]]]] = {
     ".pdf": load_pdf,
     ".docx": load_docx,
+    ".xlsx": load_excel,
+    ".xls": load_excel,
     ".md": load_markdown,
     ".txt": load_markdown,
 }
