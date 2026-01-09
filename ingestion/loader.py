@@ -388,95 +388,146 @@ def load_markdown(path: Path) -> Tuple[str, Dict[str, Any]]:
     return content, metadata
 
 
-
 def load_excel(path: Path) -> Tuple[str, Dict[str, Any]]:
     """Load Excel file (.xlsx, .xls) with multi-sheet support.
 
-    Inserts sheet markers between sheets in format [SHEET:sheet_name].
-    Rows are converted to pipe-separated text (similar to DOCX tables).
-    """
-    import openpyxl
-    from openpyxl.utils.exceptions import InvalidFileException
+    Processes all sheets in the workbook, adding [SHEET:sheet_name] markers
+    between sheets (similar to [PAGE:N] for PDFs). Rows are converted to
+    pipe-separated text for consistent table representation.
 
-    content_parts = []
-    metadata = {}
+    Args:
+        path: Path to the Excel file.
+
+    Returns:
+        Tuple of (extracted_text, metadata_dict).
+
+    Raises:
+        DocumentParseError: If the file cannot be read or is corrupted.
+    """
+    metadata: Dict[str, Any] = {}
+    sheet_contents: list[str] = []
     total_rows = 0
     max_columns = 0
 
+    ext = path.suffix.lower()
+
     try:
-        # Load workbook (data_only=True to get values instead of formulas)
-        workbook = openpyxl.load_workbook(str(path), data_only=True, read_only=True)
+        if ext == ".xlsx":
+            from openpyxl import load_workbook
+            from openpyxl.utils.exceptions import InvalidFileException
 
-        sheet_names = workbook.sheetnames
-        metadata["sheet_names"] = sheet_names
-        metadata["sheet_count"] = len(sheet_names)
+            try:
+                wb = load_workbook(str(path), read_only=True, data_only=True)
+            except InvalidFileException as e:
+                logger.error(f"Invalid or corrupted Excel file: {path} - {e}")
+                raise DocumentParseError(f"Corrupted Excel file: {e}", path)
+            except Exception as e:
+                if "password" in str(e).lower() or "encrypted" in str(e).lower():
+                    logger.warning(f"Password-protected Excel file: {path}")
+                    metadata["parse_warning"] = "password_protected"
+                    metadata["title"] = path.stem
+                    return "", metadata
+                raise
 
-        # Extract document properties if available
-        if workbook.properties:
-            props = workbook.properties
-            if props.title:
-                metadata["title"] = props.title
-            if props.creator:
-                metadata["author"] = props.creator
-            if props.created:
-                metadata["creation_date"] = props.created.isoformat()
-            if props.modified:
-                metadata["modification_date"] = props.modified.isoformat()
-            if props.subject:
-                metadata["subject"] = props.subject
-            if props.keywords:
-                metadata["keywords"] = props.keywords
+            sheet_names = wb.sheetnames
+            metadata["sheet_names"] = sheet_names
+            metadata["sheet_count"] = len(sheet_names)
 
-        # Fallback: use filename as title if not in metadata
-        if "title" not in metadata:
-            metadata["title"] = path.stem
+            # Extract document properties if available
+            if wb.properties:
+                props = wb.properties
+                if props.title:
+                    metadata["title"] = props.title
+                if props.creator:
+                    metadata["author"] = props.creator
+                if props.created:
+                    metadata["creation_date"] = props.created.isoformat()
+                if props.modified:
+                    metadata["modification_date"] = props.modified.isoformat()
 
-        # Process each sheet
-        for sheet_name in sheet_names:
-            sheet = workbook[sheet_name]
-            sheet_rows = []
+            for sheet_name in sheet_names:
+                ws = wb[sheet_name]
+                rows_text: list[str] = []
+                sheet_row_count = 0
 
-            for row in sheet.iter_rows():
-                # Convert cell values to strings, handling None
-                row_values = []
-                for cell in row:
-                    if cell.value is not None:
-                        row_values.append(str(cell.value).strip())
-                    else:
-                        row_values.append("")
+                for row in ws.iter_rows(values_only=True):
+                    # Convert cell values to strings, handling None
+                    cell_values = [str(cell) if cell is not None else "" for cell in row]
 
-                # Only include row if it has any non-empty values
-                if any(row_values):
-                    sheet_rows.append(" | ".join(row_values))
-                    max_columns = max(max_columns, len(row_values))
+                    # Skip completely empty rows
+                    if not any(cell_values):
+                        continue
 
-            total_rows += len(sheet_rows)
+                    sheet_row_count += 1
+                    max_columns = max(max_columns, len(cell_values))
+                    rows_text.append(" | ".join(cell_values))
 
-            # Add sheet content with marker
-            if sheet_rows:
-                sheet_content = "[SHEET:" + sheet_name + "]" + chr(10) + chr(10).join(sheet_rows)
-                content_parts.append(sheet_content)
-            else:
-                # Empty sheet still gets marker
-                content_parts.append("[SHEET:" + sheet_name + "]")
+                total_rows += sheet_row_count
 
-        workbook.close()
+                if rows_text:
+                    sheet_content = f"[SHEET:{sheet_name}]\n" + "\n".join(rows_text)
+                else:
+                    sheet_content = f"[SHEET:{sheet_name}]"
 
-        metadata["total_rows"] = total_rows
-        metadata["total_columns"] = max_columns
+                sheet_contents.append(sheet_content)
 
-    except InvalidFileException as e:
-        logger.error(f"Invalid or corrupted Excel file: {path} - {e}")
-        raise DocumentParseError(f"Corrupted Excel file: {e}", path)
+            wb.close()
+
+        elif ext == ".xls":
+            import xlrd
+
+            try:
+                wb = xlrd.open_workbook(str(path))
+            except xlrd.biffh.XLRDError as e:
+                logger.error(f"Invalid or corrupted XLS file: {path} - {e}")
+                raise DocumentParseError(f"Corrupted XLS file: {e}", path)
+
+            sheet_names = wb.sheet_names()
+            metadata["sheet_names"] = sheet_names
+            metadata["sheet_count"] = len(sheet_names)
+
+            for sheet_name in sheet_names:
+                ws = wb.sheet_by_name(sheet_name)
+                rows_text: list[str] = []
+
+                for row_idx in range(ws.nrows):
+                    cell_values = [
+                        str(ws.cell_value(row_idx, col_idx)) if ws.cell_value(row_idx, col_idx) != "" else ""
+                        for col_idx in range(ws.ncols)
+                    ]
+
+                    # Skip completely empty rows
+                    if not any(cell_values):
+                        continue
+
+                    total_rows += 1
+                    max_columns = max(max_columns, len(cell_values))
+                    rows_text.append(" | ".join(cell_values))
+
+                if rows_text:
+                    sheet_content = f"[SHEET:{sheet_name}]\n" + "\n".join(rows_text)
+                else:
+                    sheet_content = f"[SHEET:{sheet_name}]"
+
+                sheet_contents.append(sheet_content)
+
+        else:
+            raise DocumentParseError(f"Unsupported Excel format: {ext}", path)
+
+    except DocumentParseError:
+        raise
     except Exception as e:
-        error_msg = str(e).lower()
-        if "password" in error_msg or "encrypted" in error_msg:
-            logger.error(f"Password-protected Excel file: {path}")
-            raise DocumentParseError("Password-protected Excel file", path)
         logger.error(f"Failed to read Excel file: {path} - {e}")
         raise DocumentParseError(f"Excel read error: {e}", path)
 
-    return (chr(10) + chr(10)).join(content_parts), metadata
+    # Fallback: use filename as title if not in metadata
+    if "title" not in metadata:
+        metadata["title"] = path.stem
+
+    metadata["total_rows"] = total_rows
+    metadata["total_columns"] = max_columns
+
+    return "\n\n".join(sheet_contents), metadata
 
 HANDLERS: Dict[str, Callable[[Path], Tuple[str, Dict[str, Any]]]] = {
     ".pdf": load_pdf,
