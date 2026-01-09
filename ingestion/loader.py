@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 import logging
@@ -529,14 +529,13 @@ def load_excel(path: Path) -> Tuple[str, Dict[str, Any]]:
 
     return "\n\n".join(sheet_contents), metadata
 
-
 HANDLERS: Dict[str, Callable[[Path], Tuple[str, Dict[str, Any]]]] = {
     ".pdf": load_pdf,
     ".docx": load_docx,
-    ".md": load_markdown,
-    ".txt": load_markdown,
     ".xlsx": load_excel,
     ".xls": load_excel,
+    ".md": load_markdown,
+    ".txt": load_markdown,
 }
 
 
