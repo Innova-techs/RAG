@@ -388,13 +388,103 @@ def load_markdown(path: Path) -> Tuple[str, Dict[str, Any]]:
     return content, metadata
 
 
-
-def load_excel(path: Path) -> Tuple[str, Dict[str, Any]]:
-    """Load Excel file (.xlsx, .xls) with multi-sheet support.
+def load_xls_legacy(path: Path) -> Tuple[str, Dict[str, Any]]:
+    """Load legacy Excel file (.xls) using xlrd.
 
     Inserts sheet markers between sheets in format [SHEET:sheet_name].
     Rows are converted to pipe-separated text (similar to DOCX tables).
     """
+    import xlrd
+
+    content_parts = []
+    metadata = {}
+    total_rows = 0
+    max_columns = 0
+
+    try:
+        workbook = xlrd.open_workbook(str(path))
+
+        sheet_names = workbook.sheet_names()
+        metadata["sheet_names"] = sheet_names
+        metadata["sheet_count"] = len(sheet_names)
+
+        # Fallback: use filename as title (xlrd doesn't expose document properties)
+        metadata["title"] = path.stem
+
+        # Process each sheet
+        for sheet_name in sheet_names:
+            sheet = workbook.sheet_by_name(sheet_name)
+            sheet_rows = []
+
+            for row_idx in range(sheet.nrows):
+                row_values = []
+                for col_idx in range(sheet.ncols):
+                    cell = sheet.cell(row_idx, col_idx)
+                    if cell.value is not None and cell.value != "":
+                        # Handle different cell types
+                        if cell.ctype == xlrd.XL_CELL_DATE:
+                            # Convert Excel date to readable format
+                            try:
+                                date_tuple = xlrd.xldate_as_tuple(cell.value, workbook.datemode)
+                                row_values.append(f"{date_tuple[0]:04d}-{date_tuple[1]:02d}-{date_tuple[2]:02d}")
+                            except Exception:
+                                row_values.append(str(cell.value).strip())
+                        elif cell.ctype == xlrd.XL_CELL_NUMBER:
+                            # Format numbers nicely (remove .0 for integers)
+                            if cell.value == int(cell.value):
+                                row_values.append(str(int(cell.value)))
+                            else:
+                                row_values.append(str(cell.value).strip())
+                        else:
+                            row_values.append(str(cell.value).strip())
+                    else:
+                        row_values.append("")
+
+                # Only include row if it has any non-empty values
+                if any(row_values):
+                    sheet_rows.append(" | ".join(row_values))
+                    max_columns = max(max_columns, len(row_values))
+
+            total_rows += len(sheet_rows)
+
+            # Add sheet content with marker
+            if sheet_rows:
+                sheet_content = f"[SHEET:{sheet_name}]\n" + "\n".join(sheet_rows)
+                content_parts.append(sheet_content)
+            else:
+                # Empty sheet still gets marker
+                content_parts.append(f"[SHEET:{sheet_name}]")
+
+        metadata["total_rows"] = total_rows
+        metadata["total_columns"] = max_columns
+
+        logger.info(f"Loaded XLS: {path}, {len(sheet_names)} sheets, {total_rows} rows")
+
+    except xlrd.biffh.XLRDError as e:
+        error_msg = str(e).lower()
+        if "encrypted" in error_msg or "password" in error_msg:
+            logger.error(f"Password-protected XLS file: {path}")
+            raise DocumentParseError("Password-protected Excel file", path)
+        logger.error(f"Invalid or corrupted XLS file: {path} - {e}")
+        raise DocumentParseError(f"Corrupted Excel file: {e}", path)
+    except Exception as e:
+        logger.error(f"Failed to read XLS file: {path} - {e}")
+        raise DocumentParseError(f"Excel read error: {e}", path)
+
+    return "\n\n".join(content_parts), metadata
+
+
+def load_excel(path: Path) -> Tuple[str, Dict[str, Any]]:
+    """Load Excel file (.xlsx) with multi-sheet support.
+
+    For legacy .xls files, delegates to load_xls_legacy().
+    Inserts sheet markers between sheets in format [SHEET:sheet_name].
+    Rows are converted to pipe-separated text (similar to DOCX tables).
+    """
+    # Route .xls files to legacy handler (openpyxl doesn't support .xls)
+    if path.suffix.lower() == ".xls":
+        return load_xls_legacy(path)
+
     import openpyxl
     from openpyxl.utils.exceptions import InvalidFileException
 
@@ -454,16 +544,18 @@ def load_excel(path: Path) -> Tuple[str, Dict[str, Any]]:
 
             # Add sheet content with marker
             if sheet_rows:
-                sheet_content = "[SHEET:" + sheet_name + "]" + chr(10) + chr(10).join(sheet_rows)
+                sheet_content = f"[SHEET:{sheet_name}]\n" + "\n".join(sheet_rows)
                 content_parts.append(sheet_content)
             else:
                 # Empty sheet still gets marker
-                content_parts.append("[SHEET:" + sheet_name + "]")
+                content_parts.append(f"[SHEET:{sheet_name}]")
 
         workbook.close()
 
         metadata["total_rows"] = total_rows
         metadata["total_columns"] = max_columns
+
+        logger.info(f"Loaded XLSX: {path}, {len(sheet_names)} sheets, {total_rows} rows")
 
     except InvalidFileException as e:
         logger.error(f"Invalid or corrupted Excel file: {path} - {e}")
@@ -476,13 +568,13 @@ def load_excel(path: Path) -> Tuple[str, Dict[str, Any]]:
         logger.error(f"Failed to read Excel file: {path} - {e}")
         raise DocumentParseError(f"Excel read error: {e}", path)
 
-    return (chr(10) + chr(10)).join(content_parts), metadata
+    return "\n\n".join(content_parts), metadata
 
 HANDLERS: Dict[str, Callable[[Path], Tuple[str, Dict[str, Any]]]] = {
     ".pdf": load_pdf,
     ".docx": load_docx,
     ".xlsx": load_excel,
-    ".xls": load_excel,
+    ".xls": load_xls_legacy,
     ".md": load_markdown,
     ".txt": load_markdown,
 }
