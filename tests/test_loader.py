@@ -24,7 +24,7 @@ class TestPDFLoader:
 
     def test_load_pdf_single_page(self, tmp_path: Path):
         """Test PDF with single page extracts text correctly with page marker."""
-        with patch("PyPDF2.PdfReader") as mock_reader:
+        with patch("pypdf.PdfReader") as mock_reader:
             mock_page = MagicMock()
             mock_page.extract_text.return_value = "Hello World"
             mock_reader.return_value.pages = [mock_page]
@@ -43,7 +43,7 @@ class TestPDFLoader:
 
     def test_load_pdf_multi_page(self, tmp_path: Path):
         """Test PDF with multiple pages extracts all text."""
-        with patch("PyPDF2.PdfReader") as mock_reader:
+        with patch("pypdf.PdfReader") as mock_reader:
             mock_pages = []
             for i in range(3):
                 mock_page = MagicMock()
@@ -65,7 +65,7 @@ class TestPDFLoader:
 
     def test_load_pdf_encrypted(self, tmp_path: Path):
         """Test encrypted PDF returns empty content with warning."""
-        with patch("PyPDF2.PdfReader") as mock_reader:
+        with patch("pypdf.PdfReader") as mock_reader:
             mock_reader.return_value.pages = []
             mock_reader.return_value.is_encrypted = True
 
@@ -80,7 +80,7 @@ class TestPDFLoader:
 
     def test_load_pdf_partial_extraction_failure(self, tmp_path: Path):
         """Test PDF with some pages failing extraction handles gracefully."""
-        with patch("PyPDF2.PdfReader") as mock_reader:
+        with patch("pypdf.PdfReader") as mock_reader:
             mock_page1 = MagicMock()
             mock_page1.extract_text.return_value = "Good page"
 
@@ -105,9 +105,9 @@ class TestPDFLoader:
 
     def test_load_pdf_corrupted_raises_error(self, tmp_path: Path):
         """Test corrupted PDF raises DocumentParseError."""
-        from PyPDF2.errors import PdfReadError
+        from pypdf.errors import PdfReadError
 
-        with patch("PyPDF2.PdfReader") as mock_reader:
+        with patch("pypdf.PdfReader") as mock_reader:
             mock_reader.side_effect = PdfReadError("Corrupted PDF")
 
             pdf_path = tmp_path / "corrupted.pdf"
@@ -120,7 +120,7 @@ class TestPDFLoader:
 
     def test_load_pdf_empty_pages(self, tmp_path: Path):
         """Test PDF with empty pages includes page marker but no content."""
-        with patch("PyPDF2.PdfReader") as mock_reader:
+        with patch("pypdf.PdfReader") as mock_reader:
             mock_page = MagicMock()
             mock_page.extract_text.return_value = None
 
@@ -559,7 +559,7 @@ class TestErrorHandling:
 
     def test_pdf_general_exception_handling(self, tmp_path: Path):
         """Test general exceptions in PDF loading are caught."""
-        with patch("PyPDF2.PdfReader") as mock_reader:
+        with patch("pypdf.PdfReader") as mock_reader:
             mock_reader.side_effect = RuntimeError("Unexpected error")
 
             pdf_path = tmp_path / "error.pdf"
@@ -616,7 +616,7 @@ class TestPDFMetadataExtraction:
 
     def test_load_pdf_extracts_metadata(self, tmp_path: Path):
         """Test PDF metadata extraction from document properties."""
-        with patch("PyPDF2.PdfReader") as mock_reader:
+        with patch("pypdf.PdfReader") as mock_reader:
             mock_page = MagicMock()
             mock_page.extract_text.return_value = "Content"
 
@@ -648,7 +648,7 @@ class TestPDFMetadataExtraction:
 
     def test_load_pdf_title_fallback_to_filename(self, tmp_path: Path):
         """Test PDF uses filename as title when metadata is empty."""
-        with patch("PyPDF2.PdfReader") as mock_reader:
+        with patch("pypdf.PdfReader") as mock_reader:
             mock_page = MagicMock()
             mock_page.extract_text.return_value = "Content"
 

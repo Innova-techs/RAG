@@ -3,7 +3,7 @@
 import logging
 import traceback
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -28,6 +28,14 @@ SQLStore = None
 SQLStoreConfig = None
 MetadataCatalog = None
 SQLTableLoader = None
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_iso() -> str:
+    return _utc_now().isoformat().replace("+00:00", "Z")
 
 
 def _load_sql_components():
@@ -226,7 +234,7 @@ class IngestionPipeline:
         Returns:
             PipelineResult with processing statistics and failure details.
         """
-        start = datetime.utcnow()
+        start = _utc_now()
         documents = document_paths or discover_documents(self.config.input_dir)
         processed = skipped = failed = chunk_total = 0
         sql_tables_created = sql_tables_skipped = sql_rows_ingested = 0
@@ -234,11 +242,11 @@ class IngestionPipeline:
 
         if not documents:
             logger.warning("No documents found under %s", self.config.input_dir)
-            end = datetime.utcnow()
+            end = _utc_now()
             return PipelineResult(
                 0, 0, 0, 0, [],
-                start.isoformat() + "Z",
-                end.isoformat() + "Z",
+                start.isoformat().replace("+00:00", "Z"),
+                end.isoformat().replace("+00:00", "Z"),
                 (end - start).total_seconds(),
             )
 
@@ -333,7 +341,7 @@ class IngestionPipeline:
                     error_type=type(exc).__name__,
                     error_message=str(exc),
                     traceback=traceback.format_exc(),
-                    timestamp=datetime.utcnow().isoformat() + "Z",
+                    timestamp=_utc_now_iso(),
                 )
                 failures.append(failure)
                 logger.error("Unsupported document: %s", exc)
@@ -347,7 +355,7 @@ class IngestionPipeline:
                     error_type=type(exc).__name__,
                     error_message=str(exc),
                     traceback=traceback.format_exc(),
-                    timestamp=datetime.utcnow().isoformat() + "Z",
+                    timestamp=_utc_now_iso(),
                 )
                 failures.append(failure)
                 logger.exception("Failed to process %s", path)
@@ -363,15 +371,15 @@ class IngestionPipeline:
                 cleaned_up = self.storage.cleanup_orphaned_docs(orphaned)
                 logger.info("Cleaned up %d orphaned document(s)", cleaned_up)
 
-        end = datetime.utcnow()
+        end = _utc_now()
         result = PipelineResult(
             processed,
             skipped,
             failed,
             chunk_total,
             failures,
-            start.isoformat() + "Z",
-            end.isoformat() + "Z",
+            start.isoformat().replace("+00:00", "Z"),
+            end.isoformat().replace("+00:00", "Z"),
             (end - start).total_seconds(),
             cleaned_up,
             sql_tables_created,

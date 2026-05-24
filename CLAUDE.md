@@ -104,7 +104,7 @@ data/raw/ (PDF, DOC, DOCX, XLSX, XLS, CSV, TSV, MD, TXT)
 - `tiktoken_init.py`: Configures `TIKTOKEN_CACHE_DIR` for offline tiktoken usage
 
 **ingestion/** - Document parsing and chunking
-- `loader.py`: Multi-format document loading (PDF via PyPDF2, DOC via antiword/win32com, DOCX via python-docx, Excel via openpyxl, CSV/TSV via csv module)
+- `loader.py`: Multi-format document loading (PDF via pypdf, DOC via antiword/win32com, DOCX via python-docx, Excel via openpyxl, CSV/TSV via csv module)
 - `chunker.py`: Paragraph-aware chunking (~400 tokens, 80-token overlap)
 - `storage.py`: JSONL chunk persistence, manifest tracking, failure/report storage
 - `pipeline.py`: `IngestionPipeline` orchestrates discover → load → classify → chunk → store

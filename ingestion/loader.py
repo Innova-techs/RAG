@@ -6,7 +6,7 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 
 # Pre-compiled regex patterns for performance
 _LIST_PATTERN = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+")
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 class UnsupportedDocumentError(Exception):
@@ -90,8 +94,8 @@ def load_pdf(path: Path) -> Tuple[str, Dict[str, Any]]:
     Inserts page markers between pages in format [PAGE:N] where N is 1-indexed.
     This allows downstream chunking to track page boundaries.
     """
-    from PyPDF2 import PdfReader
-    from PyPDF2.errors import PdfReadError
+    from pypdf import PdfReader
+    from pypdf.errors import PdfReadError
 
     pages = []
     failed_pages = []
@@ -920,7 +924,7 @@ class DocumentLoader:
         metadata.update(extra_metadata or {})
         content_hash = hash_file(path)
         metadata["content_hash"] = content_hash
-        metadata["ingestion_timestamp"] = datetime.utcnow().isoformat() + "Z"
+        metadata["ingestion_timestamp"] = _utc_now_iso()
 
         # Add normalization metadata if normalization was applied
         if normalization_result is not None:

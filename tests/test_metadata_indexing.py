@@ -290,7 +290,7 @@ class TestPDFLoaderPageMarkers:
         """Test that PDF loader adds page markers to output."""
         from unittest.mock import MagicMock, patch
 
-        # Mock PyPDF2
+        # Mock pypdf
         mock_reader = MagicMock()
         mock_reader.pages = [MagicMock(), MagicMock()]
         mock_reader.pages[0].extract_text.return_value = "Page 1 content"
@@ -298,7 +298,7 @@ class TestPDFLoaderPageMarkers:
         mock_reader.is_encrypted = False
         mock_reader.metadata = None
 
-        with patch("PyPDF2.PdfReader", return_value=mock_reader):
+        with patch("pypdf.PdfReader", return_value=mock_reader):
             from ingestion.loader import load_pdf
 
             text, metadata = load_pdf(Path("/fake/test.pdf"))
