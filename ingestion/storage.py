@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, Iterable, List
 
@@ -12,6 +12,10 @@ if TYPE_CHECKING:
     from .pipeline import PipelineResult
 
 logger = logging.getLogger(__name__)
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 class StorageManager:
@@ -65,7 +69,7 @@ class StorageManager:
             "source_path": document.metadata.get("source_path"),
             "relative_path": document.metadata.get("relative_path"),
             "file_extension": document.metadata.get("file_extension"),
-            "last_ingested": datetime.utcnow().isoformat() + "Z",
+            "last_ingested": _utc_now_iso(),
             "metadata": document.metadata,
         }
         self._manifest[document.doc_id] = manifest_entry

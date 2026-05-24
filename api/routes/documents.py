@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -41,7 +41,7 @@ async def list_documents() -> DocumentsResponse:
             try:
                 ingested_at = datetime.fromisoformat(ingested_str.replace("Z", "+00:00"))
             except (ValueError, AttributeError):
-                ingested_at = datetime.utcnow()
+                ingested_at = datetime.now(timezone.utc)
 
             doc_info = DocumentInfo(
                 doc_id=doc_id,

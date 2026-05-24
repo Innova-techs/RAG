@@ -14,7 +14,7 @@ This epic delivers a usable retrieval augmented generation (RAG) MVP that lets u
 
 #### Implementation snapshot
 - Python ingestion package under `ingestion/` handles parsing, normalization, chunking, and persistence.
-- Document loaders support PDF (`PyPDF2`), DOC (`antiword`/`win32com`), DOCX (`python-docx`), Excel (`openpyxl`), CSV/TSV (with auto delimiter detection), Markdown, and plain text. Each run computes a content hash so unchanged documents are skipped automatically.
+- Document loaders support PDF (`pypdf`), DOC (`antiword`/`win32com`), DOCX (`python-docx`), Excel (`openpyxl`), CSV/TSV (with auto delimiter detection), Markdown, and plain text. Each run computes a content hash so unchanged documents are skipped automatically.
 - Heuristic chunker groups paragraphs into ~400-token windows with ~80-token overlap to preserve context continuity.
 - Outputs are written to `data/processed/chunks/<doc_id>.jsonl` plus a `manifest.json` summarizing each document's metadata and hash, guaranteeing idempotent re-runs.
 
