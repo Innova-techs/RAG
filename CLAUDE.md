@@ -53,6 +53,38 @@ python -m scripts.rag_chat -q "What skills are in demand?" --show-sources
 python -m scripts.rag_chat -q "Summarize the report" --json
 ```
 
+### LLM Provider Configuration
+
+The RAG chat supports multiple LLM providers. Set `LLM_PROVIDER` in `.env`:
+
+| Provider | Value | Description |
+|----------|-------|-------------|
+| Custom HMAC | `custom` | Default. Existing HMAC-authenticated API |
+| OpenAI | `openai` | OpenAI GPT models such as `gpt-4o` and `gpt-4o-mini` |
+| Anthropic | `anthropic` | Anthropic Claude models |
+| Ollama | `ollama` | Local inference with no API key required |
+
+**Quick Start Examples:**
+
+```bash
+# Use OpenAI
+export LLM_PROVIDER=openai
+export OPENAI_API_KEY=sk-...
+python -m scripts.rag_chat --interactive
+
+# Use Anthropic
+export LLM_PROVIDER=anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+python -m scripts.rag_chat --interactive
+
+# Use Ollama locally
+export LLM_PROVIDER=ollama
+export OLLAMA_MODEL=llama3.2
+python -m scripts.rag_chat --interactive
+```
+
+See `.env.example` for all configuration options, including `OPENAI_MODEL`, `ANTHROPIC_MODEL`, `OLLAMA_BASE_URL`, and the default custom HMAC API settings.
+
 ### SQL Chat (Query Tables with Natural Language)
 ```bash
 # Single question
@@ -80,11 +112,16 @@ python -m uvicorn api.main:app --reload
 python -m uvicorn api.main:app --host 0.0.0.0 --port 8080
 ```
 
-**Required environment variables** (in `.env`):
+**Required environment variables** depend on the selected provider in `.env`:
 ```
-API_KEY=your_api_key
-API_SECRET=your_api_secret
+LLM_PROVIDER=custom
+API_KEY=your_api_key              # custom provider
+API_SECRET=your_api_secret        # custom provider
 BASE_URL=https://your-llm-api-endpoint
+
+OPENAI_API_KEY=sk-...             # openai provider
+ANTHROPIC_API_KEY=sk-ant-...      # anthropic provider
+OLLAMA_BASE_URL=http://localhost:11434
 ```
 
 ## Architecture
@@ -123,7 +160,10 @@ data/raw/ (PDF, DOC, DOCX, XLSX, XLS, CSV, TSV, MD, TXT)
 - `summary_indexer.py`: `SummaryIndexer` for indexing dataset summaries in Chroma
 
 **generation/** - LLM-powered response generation
-- `api_client.py`: HMAC-authenticated LLM client with `LLMClient`, `LLMConfig`
+- `base.py`: `BaseLLMClient` protocol and shared response/message models
+- `factory.py`: Provider factory using `LLM_PROVIDER` (`custom`, `openai`, `anthropic`, `ollama`)
+- `providers/`: OpenAI, Anthropic, and Ollama client implementations
+- `api_client.py`: Custom HMAC-authenticated LLM client with `LLMClient`, `LLMConfig`
 - `rag_chain.py`: `RAGChain` combines retrieval (vector/lexical/hybrid) and generation
 - `dataset_summarizer.py`: `DatasetSummarizer` generates LLM summaries for tabular datasets
 - `cost_tracker.py`: `CostTracker` for token usage tracking and budget controls
