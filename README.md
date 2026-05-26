@@ -99,12 +99,19 @@ PY
 - Integration tests cover representative pilot queries.
 
 #### Implementation snapshot
-- `generation/` package provides RAG chain functionality: HMAC-authenticated LLM client (`api_client.py`) and retrieval + generation logic (`rag_chain.py`).
+- `generation/` package provides RAG chain functionality, a provider factory for `custom`, `openai`, `anthropic`, and `ollama` LLM clients, and retrieval + generation logic (`rag_chain.py`).
 - `RAGChain` retrieves top-k chunks from Chroma, formats them as context, and sends to the LLM API with a grounding prompt that instructs the model to answer only from provided context.
 - CLI `python -m scripts.rag_chat` supports single questions, interactive chat mode, and JSON output.
 
 #### Setup
-1. Create a `.env` file in the project root with your LLM provider credentials:
+1. Copy `.env.example` to `.env` and choose an LLM provider:
+
+   | Provider | `LLM_PROVIDER` | Required settings |
+   | --- | --- | --- |
+   | Custom HMAC API | `custom` | `API_KEY`, `API_SECRET`, `BASE_URL` |
+   | OpenAI | `openai` | `OPENAI_API_KEY`, optional `OPENAI_MODEL` |
+   | Anthropic | `anthropic` | `ANTHROPIC_API_KEY`, optional `ANTHROPIC_MODEL` |
+   | Ollama | `ollama` | optional `OLLAMA_BASE_URL`, `OLLAMA_MODEL` |
 
    **OpenAI Provider:**
    ```env
@@ -122,10 +129,24 @@ PY
 
    **Legacy HMAC Provider:**
    ```env
+   LLM_PROVIDER=custom
    API_KEY=your_api_key
    API_SECRET=your_api_secret
    BASE_URL=https://your-llm-api-endpoint
    ```
+
+   **Ollama Provider:**
+   ```env
+   LLM_PROVIDER=ollama
+   OLLAMA_BASE_URL=http://localhost:11434
+   OLLAMA_MODEL=llama3.2
+   ```
+
+#### LLM provider architecture
+- `generation/base.py` defines the `BaseLLMClient` protocol shared by all providers.
+- `generation/factory.py` reads `LLM_PROVIDER` and returns the configured client.
+- `generation/providers/` contains OpenAI, Anthropic, and Ollama implementations.
+- `generation/api_client.py` keeps the custom HMAC-authenticated client for backwards compatibility.
 
 #### How to run it
 1. Ensure indexing has completed (`data/vectorstore/` exists with indexed chunks).
