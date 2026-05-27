@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from ingestion import text_utils
 from ingestion.chunker import (
     DEFAULT_CHUNK_SIZE_TOKENS,
     DEFAULT_OVERLAP_PERCENT,
@@ -100,6 +101,22 @@ class TestSplitIntoUnits:
     def test_split_into_units_empty(self):
         """Test splitting empty text."""
         assert split_into_units("", max_tokens=100) == []
+
+
+class TestSplitByWords:
+    """Tests for word-level token accounting."""
+
+    def test_first_word_does_not_include_space_token(self, monkeypatch):
+        """The first word in a chunk should not reserve a leading space token."""
+        monkeypatch.setattr(text_utils, "count_tokens", lambda text, encoding="cl100k_base": 1)
+
+        assert text_utils._split_by_words("alpha beta", max_tokens=3) == ["alpha beta"]
+
+    def test_subsequent_words_include_space_token(self, monkeypatch):
+        """Later words should count a separating space token."""
+        monkeypatch.setattr(text_utils, "count_tokens", lambda text, encoding="cl100k_base": 1)
+
+        assert text_utils._split_by_words("alpha beta gamma", max_tokens=4) == ["alpha beta", "gamma"]
 
 
 class TestChunkDocument:
