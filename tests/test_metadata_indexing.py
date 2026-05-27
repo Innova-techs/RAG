@@ -15,6 +15,21 @@ from ingestion.chunker import (
 from ingestion.models import Document
 
 
+class TestMetadataVerificationResult:
+    """Tests for metadata verification result defaults."""
+
+    def test_field_coverage_default_is_independent(self):
+        """Each result should get its own coverage dictionary."""
+        from indexing.pipeline import MetadataVerificationResult
+
+        first = MetadataVerificationResult()
+        second = MetadataVerificationResult()
+
+        first.field_coverage["doc_id"] = 100.0
+
+        assert second.field_coverage == {}
+
+
 class TestPageMarkerExtraction:
     """Tests for page marker detection and extraction."""
 
