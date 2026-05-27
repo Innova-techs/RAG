@@ -173,14 +173,15 @@ def _split_by_words(text: str, max_tokens: int, encoding: str = "cl100k_base") -
             continue
 
         # Check if adding this word exceeds limit
-        if current_tokens + word_tokens + 1 > max_tokens:  # +1 for space
+        space_tokens = 1 if current_chunk else 0
+        if current_tokens + word_tokens + space_tokens > max_tokens:
             if current_chunk:
                 result.append(" ".join(current_chunk))
             current_chunk = [word]
             current_tokens = word_tokens
         else:
             current_chunk.append(word)
-            current_tokens += word_tokens + (1 if current_chunk else 0)
+            current_tokens += word_tokens + space_tokens
 
     if current_chunk:
         result.append(" ".join(current_chunk))
