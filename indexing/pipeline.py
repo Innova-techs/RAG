@@ -4,7 +4,7 @@ import logging
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from chromadb.api.types import Documents, Embeddings, IDs, Metadatas
 
@@ -43,11 +43,7 @@ class MetadataVerificationResult:
 
     verified_chunks: int = 0
     missing_fields: int = 0
-    field_coverage: dict = None
-
-    def __post_init__(self):
-        if self.field_coverage is None:
-            self.field_coverage = {}
+    field_coverage: Dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
